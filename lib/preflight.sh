@@ -77,7 +77,7 @@ preflight_check_cloudflare() {
   fi
 
   local status
-  status=$(echo "${body}" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4)
+  status=$(echo "${body}" | grep -o '"status" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
   if [[ "${status}" != "active" ]]; then
     error "Cloudflare API token is not active (status: ${status})"
   fi

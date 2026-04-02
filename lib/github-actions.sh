@@ -43,9 +43,9 @@ gh_set_secrets() {
   fi
 
   local repo_pubkey
-  repo_pubkey=$(echo "${GH_API_BODY}" | grep -o '"key":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  repo_pubkey=$(echo "${GH_API_BODY}" | grep -o '"key" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   local repo_key_id
-  repo_key_id=$(echo "${GH_API_BODY}" | grep -o '"key_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  repo_key_id=$(echo "${GH_API_BODY}" | grep -o '"key_id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
   if [[ -z "${repo_pubkey}" || -z "${repo_key_id}" ]]; then
     warn "Could not parse repo public key. Falling back to printing secrets."
@@ -145,7 +145,7 @@ gh_push_workflow() {
   # Check if file already exists
   gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" || true
   local sha
-  sha=$(echo "${GH_API_BODY}" | grep -o '"sha":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  sha=$(echo "${GH_API_BODY}" | grep -o '"sha" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
   local data
   if [[ -n "${sha}" ]]; then
