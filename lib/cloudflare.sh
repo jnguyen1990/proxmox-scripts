@@ -178,26 +178,45 @@ cf_create_access_app() {
   # ── Find or create Access application ──
   info "Setting up Cloudflare Access for SSH..."
 
-  # Check for existing app on this domain
+  # Try to create Access application; handle conflict if it already exists
   local app_id=""
-  if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/apps"; then
-    app_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"domain\":\"${subdomain}.${CF_DOMAIN}\"[^}]*}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+  if cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
+    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
+    app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    success "Access app created"
+  else
+    # 409 = already exists. Delete it and recreate.
+    info "Access app conflict, cleaning up existing app..."
+    if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/apps"; then
+      # Find the app ID that owns our domain
+      local all_apps="${CF_API_BODY}"
+      # Extract IDs of all apps, check each one
+      local ids
+      ids=$(echo "${all_apps}" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 || true)
+      for id in ${ids}; do
+        if echo "${all_apps}" | grep -q "${subdomain}.${CF_DOMAIN}"; then
+          # Try deleting this app
+          if cf_api_optional DELETE "/accounts/${CF_ACCOUNT_ID}/access/apps/${id}"; then
+            info "Deleted existing Access app ${id}"
+          fi
+        fi
+      done
+    fi
+    # Retry creation
+    if cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
+      "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
+      app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+      success "Access app created"
+    else
+      warn "Could not create Access app after cleanup. Check CF dashboard manually."
+      return 0
+    fi
   fi
 
-  if [[ -n "${app_id}" ]]; then
-    info "Access app already exists for ${subdomain}.${CF_DOMAIN}, reusing"
-  else
-    if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
-      "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
-      warn "Could not create Access app. Add 'Account > Access: Apps and Policies > Edit' to your CF API token."
-      return 0
-    fi
-    app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-    if [[ -z "${app_id}" ]]; then
-      warn "Failed to extract Access app ID."
-      return 0
-    fi
-    success "Access app created"
+  if [[ -z "${app_id}" ]]; then
+    warn "Failed to extract Access app ID."
+    return 0
   fi
 
   # ── Find or create service token ──
