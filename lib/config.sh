@@ -65,11 +65,12 @@ GH_PAT="${GH_PAT}"
 EOF
   fi
 
-  if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
+  if [[ -n "${RAILS_MASTER_KEY:-}" && -n "${REPO_NAME:-}" ]]; then
+    local _app_key_var="RAILS_MASTER_KEY_$(echo "${REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')"
     cat >> "${SECRETS_FILE}" << EOF
 
-# Rails
-RAILS_MASTER_KEY="${RAILS_MASTER_KEY}"
+# Rails master key for ${REPO_NAME}
+${_app_key_var}="${RAILS_MASTER_KEY}"
 EOF
   fi
 
@@ -132,12 +133,18 @@ load_config() {
     read -rp "$(echo -e "${BOLD}Storage pool${NC} [${STORAGE}]: ")" _storage
     STORAGE="${_storage:-${STORAGE}}"
 
-    # ── Rails Master Key ──
+    # ── Rails Master Key (per-app) ──
+    # Check for app-specific key first, then generic fallback
+    local _app_key_var="RAILS_MASTER_KEY_$(echo "${REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')"
+    if [[ -n "${!_app_key_var:-}" ]]; then
+      RAILS_MASTER_KEY="${!_app_key_var}"
+    fi
     if [[ -z "${RAILS_MASTER_KEY:-}" ]]; then
       echo ""
-      read -rp "$(echo -e "${BOLD}Rails master key${NC} (from config/master.key, or Enter to skip): ")" RAILS_MASTER_KEY
+      info "Find this in your app's config/master.key file"
+      read -rp "$(echo -e "${BOLD}Rails master key for ${REPO_NAME}${NC} (or Enter to skip): ")" RAILS_MASTER_KEY
     else
-      info "Rails master key: (saved) ****${RAILS_MASTER_KEY: -4}"
+      info "Rails master key for ${REPO_NAME}: (saved) ****${RAILS_MASTER_KEY: -4}"
     fi
 
     # ── Cloudflare Tunnel ──
