@@ -13,7 +13,7 @@ Environment=GEM_HOME=/opt/rubies/ruby-{{RUBY_VERSION}}/lib/ruby/gems/3.3.0
 Environment=PORT={{APP_PORT}}
 Environment=RAILS_MASTER_KEY={{RAILS_MASTER_KEY}}
 Environment=RAILS_LOG_TO_STDOUT=1
-Environment=SOLID_QUEUE_IN_PUMA=true
+Environment=SOLID_QUEUE_IN_PUMA=false
 ExecStart=/opt/rubies/ruby-{{RUBY_VERSION}}/bin/bundle exec puma -C config/puma.rb
 Restart=always
 RestartSec=5
