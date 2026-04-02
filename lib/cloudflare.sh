@@ -40,13 +40,9 @@ cf_create_tunnel() {
   existing_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   if [[ -n "${existing_id}" ]]; then
-    warn "Tunnel '${tunnel_name}' already exists (${existing_id}), reusing it"
-    TUNNEL_ID="${existing_id}"
-
-    # Generate new secret for credentials file
-    TUNNEL_SECRET=$(openssl rand -base64 32)
-    success "Using existing tunnel: ${tunnel_name} (${TUNNEL_ID})"
-    return 0
+    warn "Tunnel '${tunnel_name}' already exists (${existing_id}), deleting old tunnel..."
+    cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${existing_id}"
+    success "Old tunnel deleted"
   fi
 
   # Generate a random 32-byte secret
