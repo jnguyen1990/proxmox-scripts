@@ -35,6 +35,14 @@ lxc_create() {
     --start 0
 
   success "Container ${CTID} created"
+
+  # Enable TUN device for Tailscale if configured
+  if [[ -n "${TS_AUTHKEY:-}" ]]; then
+    info "Enabling TUN device for Tailscale..."
+    echo "lxc.cgroup2.devices.allow: c 10:200 rwm" >> "/etc/pve/lxc/${CTID}.conf"
+    echo "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file" >> "/etc/pve/lxc/${CTID}.conf"
+    success "TUN device enabled"
+  fi
 }
 
 lxc_start() {
