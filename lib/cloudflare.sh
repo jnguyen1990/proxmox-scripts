@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Cloudflare tunnel creation via API + cloudflared daemon in LXC
 
+CF_API_BODY=""
+
 cf_api() {
   local method="$1"
   local endpoint="$2"
@@ -18,32 +20,44 @@ cf_api() {
 
   local http_code
   http_code=$(echo "${response}" | tail -1)
-  local body
-  body=$(echo "${response}" | sed '$d')
+  CF_API_BODY=$(echo "${response}" | sed '$d')
 
-  if [[ "${http_code}" -lt 200 || "${http_code}" -ge 300 ]]; then
+  if ! [[ "${http_code}" =~ ^[0-9]+$ ]] || [[ "${http_code}" -lt 200 ]] || [[ "${http_code}" -ge 300 ]]; then
     local errors
-    errors=$(echo "${body}" | grep -o '"message":"[^"]*"' | head -3)
-    error "Cloudflare API error (HTTP ${http_code}): ${errors:-${body}}"
+    errors=$(echo "${CF_API_BODY}" | grep -o '"message":"[^"]*"' | head -3)
+    error "Cloudflare API error (HTTP ${http_code}): ${errors:-${CF_API_BODY}}"
   fi
-
-  echo "${body}"
 }
 
 cf_create_tunnel() {
   info "Creating Cloudflare tunnel..."
 
+  local tunnel_name="${REPO_NAME}-tunnel"
+
+  # Check if tunnel already exists
+  cf_api GET "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel?name=${tunnel_name}&is_deleted=false"
+  local existing_id
+  existing_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+  if [[ -n "${existing_id}" ]]; then
+    warn "Tunnel '${tunnel_name}' already exists (${existing_id}), reusing it"
+    TUNNEL_ID="${existing_id}"
+
+    # Generate new secret for credentials file
+    TUNNEL_SECRET=$(openssl rand -base64 32)
+    success "Using existing tunnel: ${tunnel_name} (${TUNNEL_ID})"
+    return 0
+  fi
+
   # Generate a random 32-byte secret
   TUNNEL_SECRET=$(openssl rand -base64 32)
 
-  local tunnel_name="${REPO_NAME}-tunnel"
-  local response
-  response=$(cf_api POST "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel" \
-    "{\"name\":\"${tunnel_name}\",\"tunnel_secret\":\"${TUNNEL_SECRET}\",\"config_src\":\"local\"}")
+  cf_api POST "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel" \
+    "{\"name\":\"${tunnel_name}\",\"tunnel_secret\":\"${TUNNEL_SECRET}\",\"config_src\":\"local\"}"
 
-  TUNNEL_ID=$(echo "${response}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  TUNNEL_ID=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
   if [[ -z "${TUNNEL_ID}" ]]; then
-    error "Failed to extract tunnel ID from response"
+    error "Failed to extract tunnel ID from response: ${CF_API_BODY}"
   fi
 
   success "Tunnel created: ${tunnel_name} (${TUNNEL_ID})"
@@ -54,20 +68,19 @@ cf_create_dns_route() {
   info "Creating DNS record: ${subdomain}.${CF_DOMAIN} -> tunnel..."
 
   # Check if record already exists
-  local existing
-  existing=$(cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}.${CF_DOMAIN}&type=CNAME")
+  cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}.${CF_DOMAIN}&type=CNAME"
   local count
-  count=$(echo "${existing}" | grep -o '"count":[0-9]*' | head -1 | cut -d: -f2)
+  count=$(echo "${CF_API_BODY}" | grep -o '"count":[0-9]*' | head -1 | cut -d: -f2)
 
-  if [[ "${count}" -gt 0 ]]; then
+  if [[ "${count:-0}" -gt 0 ]]; then
     warn "DNS record for ${subdomain}.${CF_DOMAIN} already exists, updating..."
     local record_id
-    record_id=$(echo "${existing}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    record_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     cf_api PUT "/zones/${CF_ZONE_ID}/dns_records/${record_id}" \
-      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}" >/dev/null
+      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}"
   else
     cf_api POST "/zones/${CF_ZONE_ID}/dns_records" \
-      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}" >/dev/null
+      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}"
   fi
 
   success "DNS record created: ${subdomain}.${CF_DOMAIN}"
@@ -76,7 +89,7 @@ cf_create_dns_route() {
 cf_install_cloudflared() {
   info "Installing cloudflared in container..."
 
-  pct exec "${CTID}" -- bash -c '
+  pct exec "${CTID}" -- bash -c 'set -e
     curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
     echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" > /etc/apt/sources.list.d/cloudflared.list
     apt-get update -qq
@@ -90,7 +103,7 @@ cf_write_credentials() {
 
   local creds_json="{\"AccountTag\":\"${CF_ACCOUNT_ID}\",\"TunnelSecret\":\"${TUNNEL_SECRET}\",\"TunnelID\":\"${TUNNEL_ID}\"}"
 
-  pct exec "${CTID}" -- bash -c "
+  pct exec "${CTID}" -- bash -c "set -e
     mkdir -p /etc/cloudflared
     cat > /etc/cloudflared/${TUNNEL_ID}.json << 'CREDS_EOF'
 ${creds_json}
@@ -132,34 +145,32 @@ cf_create_access_app() {
   local subdomain="${CF_SUBDOMAIN:-${REPO_NAME}}"
   info "Creating Cloudflare Access application for SSH..."
 
-  local response
-  response=$(cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
-    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}")
+  cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
+    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}" || true
 
   local app_id
-  app_id=$(echo "${response}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   if [[ -z "${app_id}" ]]; then
     warn "Failed to create Access application. GitHub Actions SSH proxy may not work."
-    return 1
+    return 0
   fi
 
   info "Creating service token for GitHub Actions..."
-  local token_response
-  token_response=$(cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/service_tokens" \
-    "{\"name\":\"${REPO_NAME}-deploy\"}")
+  cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/service_tokens" \
+    "{\"name\":\"${REPO_NAME}-deploy\"}" || true
 
-  CF_ACCESS_CLIENT_ID=$(echo "${token_response}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-  CF_ACCESS_CLIENT_SECRET=$(echo "${token_response}" | grep -o '"client_secret":"[^"]*"' | head -1 | cut -d'"' -f4)
+  CF_ACCESS_CLIENT_ID=$(echo "${CF_API_BODY}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+  CF_ACCESS_CLIENT_SECRET=$(echo "${CF_API_BODY}" | grep -o '"client_secret":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-  if [[ -z "${CF_ACCESS_CLIENT_ID}" || -z "${CF_ACCESS_CLIENT_SECRET}" ]]; then
+  if [[ -z "${CF_ACCESS_CLIENT_ID:-}" || -z "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
     warn "Failed to create service token. You'll need to set up Cloudflare Access manually."
-    return 1
+    return 0
   fi
 
   # Create a policy allowing the service token
   cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}/policies" \
-    "{\"name\":\"${REPO_NAME}-deploy-policy\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"${CF_ACCESS_CLIENT_ID}\"}}]}" >/dev/null
+    "{\"name\":\"${REPO_NAME}-deploy-policy\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"${CF_ACCESS_CLIENT_ID}\"}}]}" || true
 
   success "Cloudflare Access configured for GitHub Actions SSH"
 }
