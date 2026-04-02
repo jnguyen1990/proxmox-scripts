@@ -4,7 +4,7 @@
 create_deploy_user() {
   header "Creating Deploy User"
 
-  pct exec "${CTID}" -- bash -c "
+  pct exec "${CTID}" -- bash -c "set -e
     # Create deploy user if it doesn't exist
     if ! id deploy &>/dev/null; then
       useradd -m -s /bin/bash deploy

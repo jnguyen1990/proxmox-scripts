@@ -5,7 +5,7 @@ deploy_app() {
   header "Deploying ${REPO_NAME}"
 
   info "Cloning repository..."
-  pct exec "${CTID}" -- bash -c "
+  pct exec "${CTID}" -- bash -c "set -e
     export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
     export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
     if [[ ! -d ${APP_DIR} ]]; then
@@ -15,7 +15,7 @@ deploy_app() {
   success "Repository cloned"
 
   run_with_status "Installing gems" \
-    pct exec "${CTID}" -- bash -c "
+    pct exec "${CTID}" -- bash -c "set -e
       export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
       export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
       cd ${APP_DIR}
@@ -26,7 +26,7 @@ deploy_app() {
     "
 
   info "Setting up database..."
-  pct exec "${CTID}" -- bash -c "
+  pct exec "${CTID}" -- bash -c "set -e
     export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
     export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
     cd ${APP_DIR}
@@ -38,14 +38,14 @@ deploy_app() {
   success "Database ready"
 
   run_with_status "Precompiling assets" \
-    pct exec "${CTID}" -- bash -c "
+    pct exec "${CTID}" -- bash -c "set -e
       export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
       export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
       cd ${APP_DIR}
       RAILS_ENV=production bundle exec rails assets:precompile >/dev/null 2>&1
     "
 
-  pct exec "${CTID}" -- bash -c "mkdir -p ${APP_DIR}/storage ${APP_DIR}/tmp/pids ${APP_DIR}/tmp/sockets ${APP_DIR}/log"
+  pct exec "${CTID}" -- mkdir -p "${APP_DIR}/storage" "${APP_DIR}/tmp/pids" "${APP_DIR}/tmp/sockets" "${APP_DIR}/log"
   success "App deployed to ${APP_DIR}"
 }
 
