@@ -132,6 +132,35 @@ cf_enable_service() {
   success "cloudflared service running"
 }
 
+cf_api_optional() {
+  # Like cf_api but warns instead of erroring on failure
+  local method="$1"
+  local endpoint="$2"
+  local data="${3:-}"
+
+  local args=(-s -w "\n%{http_code}" -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
+  if [[ -n "${data}" ]]; then
+    args+=(-X "${method}" -d "${data}")
+  else
+    args+=(-X "${method}")
+  fi
+
+  local response
+  response=$(curl "${args[@]}" "https://api.cloudflare.com/client/v4${endpoint}")
+
+  local http_code
+  http_code=$(echo "${response}" | tail -1)
+  CF_API_BODY=$(echo "${response}" | sed '$d')
+
+  if ! [[ "${http_code}" =~ ^[0-9]+$ ]] || [[ "${http_code}" -lt 200 ]] || [[ "${http_code}" -ge 300 ]]; then
+    local errors
+    errors=$(echo "${CF_API_BODY}" | grep -o '"message":"[^"]*"' | head -3)
+    warn "Cloudflare API error (HTTP ${http_code}): ${errors:-${CF_API_BODY}}"
+    return 1
+  fi
+  return 0
+}
+
 cf_create_access_app() {
   # Only needed when GitHub Actions is also enabled
   if [[ -z "${GH_PAT:-}" ]]; then
@@ -141,20 +170,26 @@ cf_create_access_app() {
   local subdomain="${CF_SUBDOMAIN:-${REPO_NAME}}"
   info "Creating Cloudflare Access application for SSH..."
 
-  cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
-    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}" || true
+  if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
+    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
+    warn "Could not create Access app. Add 'Account > Access: Apps and Policies > Edit' to your CF API token for GitHub Actions SSH proxy."
+    return 0
+  fi
 
   local app_id
   app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   if [[ -z "${app_id}" ]]; then
-    warn "Failed to create Access application. GitHub Actions SSH proxy may not work."
+    warn "Failed to extract Access app ID. GitHub Actions SSH proxy may not work."
     return 0
   fi
 
   info "Creating service token for GitHub Actions..."
-  cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/service_tokens" \
-    "{\"name\":\"${REPO_NAME}-deploy\"}" || true
+  if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/service_tokens" \
+    "{\"name\":\"${REPO_NAME}-deploy\"}"; then
+    warn "Failed to create service token. You'll need to set up Cloudflare Access manually."
+    return 0
+  fi
 
   CF_ACCESS_CLIENT_ID=$(echo "${CF_API_BODY}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4)
   CF_ACCESS_CLIENT_SECRET=$(echo "${CF_API_BODY}" | grep -o '"client_secret":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -165,7 +200,7 @@ cf_create_access_app() {
   fi
 
   # Create a policy allowing the service token
-  cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}/policies" \
+  cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}/policies" \
     "{\"name\":\"${REPO_NAME}-deploy-policy\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"${CF_ACCESS_CLIENT_ID}\"}}]}" || true
 
   success "Cloudflare Access configured for GitHub Actions SSH"
