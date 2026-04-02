@@ -34,7 +34,9 @@ preflight_check_ssh_key() {
 
   # Test GitHub SSH access
   info "Testing GitHub SSH access..."
-  if ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 | grep -qi "success"; then
+  local ssh_output
+  ssh_output=$(ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+  if echo "${ssh_output}" | grep -qi "success"; then
     success "GitHub SSH access confirmed"
   else
     warn "GitHub SSH access failed."
@@ -44,7 +46,9 @@ preflight_check_ssh_key() {
     echo ""
     read -rp "$(echo -e "${BOLD}Press Enter once you've added the key (or Ctrl+C to cancel)...${NC}")" _
     # Re-test
-    if ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 | grep -qi "success"; then
+    local ssh_output
+  ssh_output=$(ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+  if echo "${ssh_output}" | grep -qi "success"; then
       success "GitHub SSH access confirmed"
     else
       error "Still can't authenticate with GitHub. Check the key was added correctly."
