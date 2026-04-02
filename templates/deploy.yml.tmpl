@@ -11,7 +11,7 @@ jobs:
 {{#CLOUDFLARE}}
       - name: Install cloudflared
         run: |
-          curl -fsSL https://pkg.cloudflare.com/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb
           sudo dpkg -i /tmp/cloudflared.deb
 
       - name: Deploy via Cloudflare tunnel
