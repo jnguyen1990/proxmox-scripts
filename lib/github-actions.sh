@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # GitHub Actions workflow generation and secrets management
 
+GH_API_BODY=""
+
 gh_api() {
   local method="$1"
   local endpoint="$2"
@@ -18,15 +20,13 @@ gh_api() {
 
   local http_code
   http_code=$(echo "${response}" | tail -1)
-  local body
-  body=$(echo "${response}" | sed '$d')
+  GH_API_BODY=$(echo "${response}" | sed '$d')
 
-  if [[ "${http_code}" -lt 200 || "${http_code}" -ge 300 ]]; then
-    warn "GitHub API error (HTTP ${http_code}): ${body}"
+  if ! [[ "${http_code}" =~ ^[0-9]+$ ]] || [[ "${http_code}" -lt 200 ]] || [[ "${http_code}" -ge 300 ]]; then
+    warn "GitHub API error (HTTP ${http_code}): ${GH_API_BODY}"
     return 1
   fi
-
-  echo "${body}"
+  return 0
 }
 
 gh_set_secrets() {
@@ -36,17 +36,21 @@ gh_set_secrets() {
   info "Setting GitHub Actions secrets on ${GITHUB_USER}/${REPO_NAME}..."
 
   # Get the repo's public key for secret encryption
-  local pubkey_response
-  pubkey_response=$(gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/actions/secrets/public-key")
-  local repo_pubkey
-  repo_pubkey=$(echo "${pubkey_response}" | grep -o '"key":"[^"]*"' | head -1 | cut -d'"' -f4)
-  local repo_key_id
-  repo_key_id=$(echo "${pubkey_response}" | grep -o '"key_id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [[ -z "${repo_pubkey}" || -z "${repo_key_id}" ]]; then
+  if ! gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/actions/secrets/public-key"; then
     warn "Could not get repo public key. Falling back to printing secrets."
     gh_print_secrets "${deploy_key}" "${deploy_host}"
-    return 1
+    return 0
+  fi
+
+  local repo_pubkey
+  repo_pubkey=$(echo "${GH_API_BODY}" | grep -o '"key":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  local repo_key_id
+  repo_key_id=$(echo "${GH_API_BODY}" | grep -o '"key_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+  if [[ -z "${repo_pubkey}" || -z "${repo_key_id}" ]]; then
+    warn "Could not parse repo public key. Falling back to printing secrets."
+    gh_print_secrets "${deploy_key}" "${deploy_host}"
+    return 0
   fi
 
   # Check if Python + PyNaCl is available for encryption
@@ -97,10 +101,12 @@ encrypted = sealed_box.encrypt('''${value}'''.encode('utf-8'))
 print(base64.b64encode(encrypted).decode('utf-8'))
 ")
 
-  gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/actions/secrets/${name}" \
-    "{\"encrypted_value\":\"${encrypted}\",\"key_id\":\"${key_id}\"}" >/dev/null
-
-  info "  Set secret: ${name}"
+  if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/actions/secrets/${name}" \
+    "{\"encrypted_value\":\"${encrypted}\",\"key_id\":\"${key_id}\"}"; then
+    info "  Set secret: ${name}"
+  else
+    warn "  Failed to set secret: ${name}"
+  fi
 }
 
 gh_print_secrets() {
@@ -137,10 +143,9 @@ gh_push_workflow() {
   encoded=$(echo "${workflow_content}" | base64 | tr -d '\n')
 
   # Check if file already exists
-  local existing
-  existing=$(gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" 2>/dev/null || true)
+  gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" || true
   local sha
-  sha=$(echo "${existing}" | grep -o '"sha":"[^"]*"' | head -1 | cut -d'"' -f4)
+  sha=$(echo "${GH_API_BODY}" | grep -o '"sha":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
   local data
   if [[ -n "${sha}" ]]; then
@@ -149,7 +154,7 @@ gh_push_workflow() {
     data="{\"message\":\"Add auto-deploy workflow\",\"content\":\"${encoded}\"}"
   fi
 
-  if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" "${data}" >/dev/null; then
+  if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" "${data}"; then
     success "GitHub Actions workflow pushed"
   else
     warn "Failed to push workflow. You can add it manually."
