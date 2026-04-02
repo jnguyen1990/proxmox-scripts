@@ -16,14 +16,16 @@ _maybe_save_secrets() {
   local has_new_secrets=false
 
   # Check if there are secrets that aren't already saved
-  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" ]]; then
+  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" || -n "${TS_AUTHKEY:-}" ]]; then
     if [[ -f "${SECRETS_FILE}" ]]; then
       # shellcheck source=/dev/null
       local _existing_cf _existing_gh
       _existing_cf=$(grep -c "CF_API_TOKEN" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       _existing_gh=$(grep -c "GH_PAT" "${SECRETS_FILE}" 2>/dev/null || echo 0)
+      _existing_ts=$(grep -c "TS_AUTHKEY" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       [[ -n "${CF_API_TOKEN:-}" && "${_existing_cf}" == "0" ]] && has_new_secrets=true
       [[ -n "${GH_PAT:-}" && "${_existing_gh}" == "0" ]] && has_new_secrets=true
+      [[ -n "${TS_AUTHKEY:-}" && "${_existing_ts}" == "0" ]] && has_new_secrets=true
     else
       has_new_secrets=true
     fi
@@ -62,6 +64,14 @@ EOF
 
 # GitHub
 GH_PAT="${GH_PAT}"
+EOF
+  fi
+
+  if [[ -n "${TS_AUTHKEY:-}" ]]; then
+    cat >> "${SECRETS_FILE}" << EOF
+
+# Tailscale
+TS_AUTHKEY="${TS_AUTHKEY}"
 EOF
   fi
 
@@ -199,6 +209,24 @@ load_config() {
       fi
     fi
 
+    # ── Tailscale (for SSH access + GitHub Actions deploys) ──
+    echo ""
+    if [[ -n "${TS_AUTHKEY:-}" ]]; then
+      info "Tailscale auth key loaded from ${SECRETS_FILE}"
+      read -rp "$(echo -e "${BOLD}Set up Tailscale for SSH access?${NC} [Y/n]: ")" _ts
+      _ts="${_ts:-y}"
+    else
+      read -rp "$(echo -e "${BOLD}Set up Tailscale for SSH access?${NC} [y/N]: ")" _ts
+    fi
+    if [[ "${_ts,,}" == "y" ]]; then
+      if [[ -n "${TS_AUTHKEY:-}" ]]; then
+        info "Tailscale auth key: (saved) ****${TS_AUTHKEY: -4}"
+      else
+        info "Get a reusable auth key from: https://login.tailscale.com/admin/settings/keys"
+        _read_value "Tailscale auth key"; TS_AUTHKEY="${_read_result}"
+      fi
+    fi
+
     # ── Offer to save secrets ──
     _maybe_save_secrets
   fi
@@ -215,6 +243,7 @@ validate_config() {
   info "Specs: ${LXC_CORES} core(s), ${LXC_RAM}MB RAM, ${LXC_DISK}GB disk"
   info "Storage: ${STORAGE}"
   [[ -n "${CF_API_TOKEN:-}" ]] && info "Cloudflare: ${CF_SUBDOMAIN:-${REPO_NAME}}.${CF_DOMAIN}"
+  [[ -n "${TS_AUTHKEY:-}" ]] && info "Tailscale: enabled"
   [[ -n "${GH_PAT:-}" ]] && info "GitHub Actions: enabled"
   echo ""
 

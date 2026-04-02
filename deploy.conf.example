@@ -63,12 +63,21 @@ REPO_NAME=""
 # Defaults to REPO_NAME if not set
 # CF_SUBDOMAIN=""
 
+# ── Tailscale (optional) ───────────────────────────────────────────────────
+# Mesh VPN for SSH access to containers from anywhere.
+# Used by GitHub Actions for auto-deploy (replaces Cloudflare Access).
+# Get a reusable auth key from: https://login.tailscale.com/admin/settings/keys
+
+# Tailscale auth key (reusable)
+# TS_AUTHKEY=""
+
 # ── GitHub Actions Auto-Deploy (optional) ──────────────────────────────────
 # Leave empty to skip. When set, the deploy script will:
 #   1. Add deployment secrets to your GitHub repo
 #   2. Push a GitHub Actions workflow file for auto-deploy on push to main
 #
 # Required token permissions: repo (full control)
+# Requires Tailscale to be configured for SSH access.
 
 # GitHub personal access token
 # GH_PAT=""

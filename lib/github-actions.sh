@@ -59,10 +59,9 @@ gh_set_secrets() {
     _gh_set_secret_encrypted "DEPLOY_USER" "deploy" "${repo_pubkey}" "${repo_key_id}"
     _gh_set_secret_encrypted "DEPLOY_SSH_KEY" "${deploy_key}" "${repo_pubkey}" "${repo_key_id}"
 
-    # Cloudflare Access secrets if applicable
-    if [[ -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
-      _gh_set_secret_encrypted "CF_ACCESS_CLIENT_ID" "${CF_ACCESS_CLIENT_ID}" "${repo_pubkey}" "${repo_key_id}"
-      _gh_set_secret_encrypted "CF_ACCESS_CLIENT_SECRET" "${CF_ACCESS_CLIENT_SECRET}" "${repo_pubkey}" "${repo_key_id}"
+    # Tailscale auth key for GitHub Actions runner to join tailnet
+    if [[ -n "${TS_AUTHKEY:-}" ]]; then
+      _gh_set_secret_encrypted "TS_AUTHKEY" "${TS_AUTHKEY}" "${repo_pubkey}" "${repo_key_id}"
     fi
 
     success "GitHub Actions secrets set"
@@ -73,9 +72,8 @@ gh_set_secrets() {
     echo "deploy" | gh secret set DEPLOY_USER --repo "${GITHUB_USER}/${REPO_NAME}"
     echo "${deploy_key}" | gh secret set DEPLOY_SSH_KEY --repo "${GITHUB_USER}/${REPO_NAME}"
 
-    if [[ -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
-      echo "${CF_ACCESS_CLIENT_ID}" | gh secret set CF_ACCESS_CLIENT_ID --repo "${GITHUB_USER}/${REPO_NAME}"
-      echo "${CF_ACCESS_CLIENT_SECRET}" | gh secret set CF_ACCESS_CLIENT_SECRET --repo "${GITHUB_USER}/${REPO_NAME}"
+    if [[ -n "${TS_AUTHKEY:-}" ]]; then
+      echo "${TS_AUTHKEY}" | gh secret set TS_AUTHKEY --repo "${GITHUB_USER}/${REPO_NAME}"
     fi
 
     success "GitHub Actions secrets set via gh CLI"
@@ -132,13 +130,10 @@ gh_print_secrets() {
   echo -e "  Secret name:  ${GREEN}DEPLOY_SSH_KEY${NC}"
   echo -e "  Secret value: ${BOLD}(copy the entire private key below, including BEGIN/END lines)${NC}"
 
-  if [[ -n "${CF_ACCESS_CLIENT_ID:-}" ]]; then
+  if [[ -n "${TS_AUTHKEY:-}" ]]; then
     echo ""
-    echo -e "  Secret name:  ${GREEN}CF_ACCESS_CLIENT_ID${NC}"
-    echo -e "  Secret value: ${BOLD}${CF_ACCESS_CLIENT_ID}${NC}"
-    echo ""
-    echo -e "  Secret name:  ${GREEN}CF_ACCESS_CLIENT_SECRET${NC}"
-    echo -e "  Secret value: ${BOLD}${CF_ACCESS_CLIENT_SECRET}${NC}"
+    echo -e "  Secret name:  ${GREEN}TS_AUTHKEY${NC}"
+    echo -e "  Secret value: ${BOLD}${TS_AUTHKEY}${NC}"
   fi
 
   echo ""
@@ -194,12 +189,9 @@ gh_setup() {
 
   local deploy_key
   deploy_key=$(get_deploy_private_key)
-  local deploy_host="${LXC_IP}"
 
-  # If Cloudflare is enabled, use the tunnel hostname
-  if [[ -n "${CF_API_TOKEN:-}" ]]; then
-    deploy_host="${CF_SUBDOMAIN:-${REPO_NAME}}.${CF_DOMAIN}"
-  fi
+  # Use Tailscale IP if available, otherwise LXC IP
+  local deploy_host="${TS_IP:-${LXC_IP}}"
 
   gh_set_secrets "${deploy_key}" "${deploy_host}"
   gh_push_workflow

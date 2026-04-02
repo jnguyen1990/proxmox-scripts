@@ -26,6 +26,7 @@ source "${SCRIPT_DIR}/lib/deploy-user.sh"
 source "${SCRIPT_DIR}/lib/systemd.sh"
 source "${SCRIPT_DIR}/lib/nginx.sh"
 source "${SCRIPT_DIR}/lib/cloudflare.sh"
+source "${SCRIPT_DIR}/lib/tailscale.sh"
 source "${SCRIPT_DIR}/lib/github-actions.sh"
 
 # ── Phase 1: Configuration ─────────────────────────────────────────────────
@@ -60,14 +61,21 @@ setup_nginx
 # ── Phase 7: Cloudflare Tunnel (conditional) ────────────────────────────────
 cf_setup
 
-# ── Phase 8: GitHub Actions (conditional) ───────────────────────────────────
+# ── Phase 8: Tailscale (conditional) ───────────────────────────────────────
+ts_setup
+
+# ── Phase 9: GitHub Actions (conditional) ───────────────────────────────────
 gh_setup
 
-# ── Phase 9: Summary ───────────────────────────────────────────────────────
+# ── Phase 10: Summary ──────────────────────────────────────────────────────
 header "Deployment Complete!"
 echo -e "${GREEN}${BOLD}App:${NC}         ${REPO_NAME}"
 echo -e "${GREEN}${BOLD}Container:${NC}   ${CTID}"
-echo -e "${GREEN}${BOLD}IP:${NC}          ${LXC_IP}"
+echo -e "${GREEN}${BOLD}LXC IP:${NC}      ${LXC_IP}"
+
+if [[ -n "${TS_IP:-}" ]]; then
+  echo -e "${GREEN}${BOLD}Tailscale:${NC}   ${TS_IP}"
+fi
 
 if [[ -n "${CF_API_TOKEN:-}" ]]; then
   echo -e "${GREEN}${BOLD}URL:${NC}         https://${CF_SUBDOMAIN:-${REPO_NAME}}.${CF_DOMAIN}"
@@ -75,10 +83,11 @@ else
   echo -e "${GREEN}${BOLD}URL:${NC}         http://${LXC_IP}"
 fi
 
+ssh_host="${TS_IP:-${LXC_IP}}"
 echo -e "${GREEN}${BOLD}App Dir:${NC}     ${APP_DIR}"
-echo -e "${GREEN}${BOLD}SSH:${NC}         ssh deploy@${LXC_IP}"
+echo -e "${GREEN}${BOLD}SSH:${NC}         ssh deploy@${ssh_host}"
 echo -e "${GREEN}${BOLD}Logs:${NC}        pct exec ${CTID} -- journalctl -u ${REPO_NAME} -f"
-echo -e "${GREEN}${BOLD}Redeploy:${NC}    ssh deploy@${LXC_IP} '${APP_DIR}/bin/deploy'"
+echo -e "${GREEN}${BOLD}Redeploy:${NC}    ssh deploy@${ssh_host} '${APP_DIR}/bin/deploy'"
 
 # If GitHub Actions wasn't configured, print the deploy key for manual setup
 if [[ -z "${GH_PAT:-}" ]]; then
