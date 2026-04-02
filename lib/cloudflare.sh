@@ -167,27 +167,58 @@ cf_create_access_app() {
     return 0
   fi
 
+  # If service token credentials are already saved, skip Access setup
+  if [[ -n "${CF_ACCESS_CLIENT_ID:-}" && -n "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
+    info "Cloudflare Access service token loaded from secrets"
+    return 0
+  fi
+
   local subdomain="${CF_SUBDOMAIN:-${REPO_NAME}}"
-  info "Creating Cloudflare Access application for SSH..."
 
-  if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
-    "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
-    warn "Could not create Access app. Add 'Account > Access: Apps and Policies > Edit' to your CF API token for GitHub Actions SSH proxy."
-    return 0
+  # ── Find or create Access application ──
+  info "Setting up Cloudflare Access for SSH..."
+
+  # Check for existing app on this domain
+  local app_id=""
+  if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/apps"; then
+    app_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"domain\":\"${subdomain}.${CF_DOMAIN}\"[^}]*}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
   fi
 
-  local app_id
-  app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-
-  if [[ -z "${app_id}" ]]; then
-    warn "Failed to extract Access app ID. GitHub Actions SSH proxy may not work."
-    return 0
+  if [[ -n "${app_id}" ]]; then
+    info "Access app already exists for ${subdomain}.${CF_DOMAIN}, reusing"
+  else
+    if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps" \
+      "{\"name\":\"${REPO_NAME}-ssh\",\"domain\":\"${subdomain}.${CF_DOMAIN}\",\"type\":\"ssh\",\"session_duration\":\"24h\"}"; then
+      warn "Could not create Access app. Add 'Account > Access: Apps and Policies > Edit' to your CF API token."
+      return 0
+    fi
+    app_id=$(echo "${CF_API_BODY}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ -z "${app_id}" ]]; then
+      warn "Failed to extract Access app ID."
+      return 0
+    fi
+    success "Access app created"
   fi
 
-  info "Creating service token for GitHub Actions..."
+  # ── Find or create service token ──
+  # Service tokens are shared across all apps, so check if one exists
+  local token_id=""
+  if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/service_tokens"; then
+    # Look for existing deploy token
+    token_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"name\":\"proxmox-deploy\"[^}]*}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    if [[ -n "${token_id}" ]]; then
+      CF_ACCESS_CLIENT_ID="${token_id}"
+      info "Existing service token found (proxmox-deploy), but secret is not retrievable"
+      warn "You need the CF_ACCESS_CLIENT_SECRET from when it was first created."
+      warn "If lost, delete the 'proxmox-deploy' token in CF dashboard and re-run."
+      return 0
+    fi
+  fi
+
+  info "Creating service token for GitHub Actions deploys..."
   if ! cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/service_tokens" \
-    "{\"name\":\"${REPO_NAME}-deploy\"}"; then
-    warn "Failed to create service token. You'll need to set up Cloudflare Access manually."
+    "{\"name\":\"proxmox-deploy\"}"; then
+    warn "Failed to create service token."
     return 0
   fi
 
@@ -195,11 +226,22 @@ cf_create_access_app() {
   CF_ACCESS_CLIENT_SECRET=$(echo "${CF_API_BODY}" | grep -o '"client_secret":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   if [[ -z "${CF_ACCESS_CLIENT_ID:-}" || -z "${CF_ACCESS_CLIENT_SECRET:-}" ]]; then
-    warn "Failed to create service token. You'll need to set up Cloudflare Access manually."
+    warn "Failed to extract service token credentials."
     return 0
   fi
 
-  # Create a policy allowing the service token
+  # Save to secrets file so we never need to create this again
+  if [[ -f "${SECRETS_FILE:-}" ]]; then
+    cat >> "${SECRETS_FILE}" << EOF
+
+# Cloudflare Access (for GitHub Actions SSH proxy)
+CF_ACCESS_CLIENT_ID="${CF_ACCESS_CLIENT_ID}"
+CF_ACCESS_CLIENT_SECRET="${CF_ACCESS_CLIENT_SECRET}"
+EOF
+    info "Service token saved to ${SECRETS_FILE}"
+  fi
+
+  # ── Create policy allowing service token on this app ──
   cf_api_optional POST "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}/policies" \
     "{\"name\":\"${REPO_NAME}-deploy-policy\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"${CF_ACCESS_CLIENT_ID}\"}}]}" || true
 
