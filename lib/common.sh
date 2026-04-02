@@ -23,6 +23,36 @@ require_cmd() {
   command -v "$1" &>/dev/null || error "$1 is required but not found. $2"
 }
 
+# Run a command with a spinner and elapsed time
+# Usage: run_with_status "Installing packages" some_command --args
+run_with_status() {
+  local label="$1"
+  shift
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local start=$SECONDS
+
+  "$@" &
+  local pid=$!
+
+  while kill -0 "${pid}" 2>/dev/null; do
+    local elapsed=$(( SECONDS - start ))
+    local i=$(( elapsed % ${#spin} ))
+    printf "\r${CYAN}  %s${NC} %s (%ds)" "${spin:$i:1}" "${label}" "${elapsed}"
+    sleep 0.2
+  done
+
+  wait "${pid}"
+  local exit_code=$?
+  local elapsed=$(( SECONDS - start ))
+  printf "\r\033[K"  # clear the spinner line
+
+  if [[ ${exit_code} -eq 0 ]]; then
+    success "${label} (${elapsed}s)"
+  else
+    error "${label} failed after ${elapsed}s"
+  fi
+}
+
 render_template() {
   local template="$1"
   sed \

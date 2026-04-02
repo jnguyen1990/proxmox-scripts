@@ -4,38 +4,48 @@
 deploy_app() {
   header "Deploying ${REPO_NAME}"
 
+  info "Cloning repository..."
   pct exec "${CTID}" -- bash -c "
     export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
     export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
-
-    # Clone repo
     if [[ ! -d ${APP_DIR} ]]; then
       git clone ${REPO_URL} ${APP_DIR}
     fi
+  "
+  success "Repository cloned"
+
+  run_with_status "Installing gems" \
+    pct exec "${CTID}" -- bash -c "
+      export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
+      export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
+      cd ${APP_DIR}
+      gem install bundler --no-document -q
+      bundle config set --local deployment true
+      bundle config set --local without 'development test'
+      bundle install --quiet
+    "
+
+  info "Setting up database..."
+  pct exec "${CTID}" -- bash -c "
+    export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
+    export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
     cd ${APP_DIR}
-
-    # Install bundler and gems
-    gem install bundler --no-document -q
-    bundle config set --local deployment true
-    bundle config set --local without 'development test'
-    bundle install --quiet
-
-    # Generate master key if missing
     if [[ ! -f config/master.key ]]; then
       EDITOR='echo' rails credentials:edit 2>/dev/null || true
     fi
-
-    # Database setup
     RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -3
-
-    # Asset precompilation
-    RAILS_ENV=production bundle exec rails assets:precompile 2>&1 | tail -3
-
-    # Create storage directory
-    mkdir -p storage tmp/pids tmp/sockets log
-
-    echo 'App deployed successfully'
   "
+  success "Database ready"
+
+  run_with_status "Precompiling assets" \
+    pct exec "${CTID}" -- bash -c "
+      export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
+      export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
+      cd ${APP_DIR}
+      RAILS_ENV=production bundle exec rails assets:precompile >/dev/null 2>&1
+    "
+
+  pct exec "${CTID}" -- bash -c "mkdir -p ${APP_DIR}/storage ${APP_DIR}/tmp/pids ${APP_DIR}/tmp/sockets ${APP_DIR}/log"
   success "App deployed to ${APP_DIR}"
 }
 
