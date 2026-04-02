@@ -6,6 +6,7 @@ install_ruby() {
 
   run_with_status "Installing ruby-install" \
     pct exec "${CTID}" -- bash -c 'set -e
+      export PATH="/usr/local/bin:$PATH"
       if ! command -v ruby-install &>/dev/null; then
         cd /tmp
         wget -q https://github.com/postmodern/ruby-install/releases/download/v0.9.4/ruby-install-0.9.4.tar.gz
@@ -28,6 +29,7 @@ install_ruby() {
 
   run_with_status "Compiling Ruby ${RUBY_VERSION} (this takes a few minutes)" \
     pct exec "${CTID}" -- bash -c "set -e
+      export PATH=\"/usr/local/bin:\$PATH\"
       if [[ ! -d /opt/rubies/ruby-${RUBY_VERSION} ]]; then
         ruby-install --no-reinstall ruby ${RUBY_VERSION} -- --disable-install-doc >/dev/null 2>&1
       fi
