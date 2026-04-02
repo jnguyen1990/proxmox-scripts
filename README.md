@@ -7,7 +7,7 @@ Modular LXC container creation and Rails app deployment for Proxmox VE, with opt
 ### Option 1: One-liner (paste into Proxmox VE shell)
 
 ```bash
-bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 ```
 
 Downloads the repo, prompts for config, and deploys.
@@ -157,5 +157,5 @@ Run the deploy once per app. Each gets its own LXC container:
 ./deploy
 
 # With one-liner - prompted each time
-bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 ```

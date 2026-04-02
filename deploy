@@ -3,8 +3,8 @@
 # ============================================================================
 # Proxmox LXC Deploy Orchestrator
 #
-# Usage (from Proxmox VE shell):
-#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
+# Usage (from Proxmox VE shell - one-liner):
+#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 #
 # Or from a cloned repo:
 #   ./deploy
@@ -12,22 +12,7 @@
 
 set -euo pipefail
 
-# ── Determine script location ───────────────────────────────────────────────
-# If run via wget/curl one-liner, bootstrap by cloning the repo
-SELF="${BASH_SOURCE[0]:-}"
-if [[ -z "${SELF}" ]] || [[ "${SELF}" == "bash" ]] || [[ ! -f "${SELF}" ]]; then
-  # Running via bash -c "$(wget ...)" -- need to clone repo first
-  BOOTSTRAP_DIR="/tmp/proxmox-scripts"
-  if [[ ! -d "${BOOTSTRAP_DIR}/lib" ]]; then
-    echo "Downloading deploy scripts..."
-    apt-get install -y -qq git >/dev/null 2>&1 || true
-    rm -rf "${BOOTSTRAP_DIR}"
-    git clone --depth 1 https://github.com/jnguyen1990/proxmox-scripts.git "${BOOTSTRAP_DIR}" 2>/dev/null
-  fi
-  SCRIPT_DIR="${BOOTSTRAP_DIR}"
-else
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Source modules ──────────────────────────────────────────────────────────
 source "${SCRIPT_DIR}/lib/common.sh"
