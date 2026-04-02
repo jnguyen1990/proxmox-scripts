@@ -1,42 +1,32 @@
 # Proxmox Rails App Deployer
 
-Modular LXC container creation and Rails app deployment for Proxmox VE, with optional Cloudflare tunnel and GitHub Actions auto-deploy.
+Modular LXC container creation and Rails app deployment for Proxmox VE, with optional Cloudflare tunnel, Tailscale VPN, and GitHub Actions auto-deploy.
 
 ## Quick Start
 
-### Option 1: One-liner (paste into Proxmox VE shell)
+SSH into your Proxmox host and run:
 
 ```bash
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 ```
 
-Downloads the repo, prompts for config, and deploys.
+The script prompts for everything. Tokens and keys are saved to `/root/.proxmox-deploy-secrets` so you only enter them once.
 
-### Option 2: Generate a custom script
+## What It Does
 
-```bash
-git clone git@github.com:jnguyen1990/proxmox-scripts.git
-cd proxmox-scripts
-cp deploy.conf.example deploy.conf
-vim deploy.conf  # fill in your values
-./generate       # outputs dist/deploy-{repo-name}.sh
-```
-
-Then paste the generated script into Proxmox VE or transfer it.
-
-### Option 3: Run from cloned repo on Proxmox
-
-```bash
-git clone git@github.com:jnguyen1990/proxmox-scripts.git /tmp/proxmox-scripts
-cd /tmp/proxmox-scripts
-cp deploy.conf.example deploy.conf
-vim deploy.conf
-./deploy
-```
+1. **Preflight** - Generates/checks SSH key, verifies GitHub access, validates tokens
+2. **LXC Creation** - Creates Debian 12 unprivileged container with TUN device (for Tailscale)
+3. **System Setup** - Installs Ruby, nginx, build tools (with progress spinners)
+4. **App Deployment** - Clones repo, bundles, migrates, precompiles assets
+5. **Deploy User** - Creates `deploy` user with SSH keys, sudoers, and GitHub access
+6. **Services** - Configures systemd + nginx reverse proxy
+7. **Cloudflare Tunnel** *(optional)* - Creates tunnel via API, installs cloudflared, sets up DNS
+8. **Tailscale** *(optional)* - Installs Tailscale in container for SSH access from anywhere
+9. **GitHub Actions** *(optional)* - Sets deployment secrets, pushes workflow for auto-deploy on push to main
 
 ## Configuration
 
-Copy `deploy.conf.example` to `deploy.conf`. Required and optional settings:
+All settings are prompted interactively. For repeated deploys, use `deploy.conf`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -48,10 +38,11 @@ Copy `deploy.conf.example` to `deploy.conf`. Required and optional settings:
 | `LXC_DISK` | `4` | Container disk in GB |
 | `LXC_CORES` | `1` | Container CPU cores |
 | `STORAGE` | `local-lvm` | Proxmox storage pool |
+| `RAILS_MASTER_KEY` | *(prompted)* | From `config/master.key` (saved per-app) |
 
 ### Cloudflare Tunnel (optional)
 
-Route traffic through Cloudflare's network instead of exposing ports directly.
+Routes web traffic through Cloudflare's network (e.g. `app.example.com`).
 
 | Setting | Description |
 |---------|-------------|
@@ -61,101 +52,86 @@ Route traffic through Cloudflare's network instead of exposing ports directly.
 | `CF_DOMAIN` | Base domain (e.g. `example.com`) |
 | `CF_SUBDOMAIN` | Subdomain (defaults to `REPO_NAME`) |
 
-### GitHub Actions Auto-Deploy (optional)
+### Tailscale (optional)
 
-Automatically push a deploy workflow and set secrets on your repo.
+Mesh VPN for SSH access to containers from anywhere. Used by GitHub Actions for auto-deploy.
 
 | Setting | Description |
 |---------|-------------|
-| `GH_PAT` | GitHub personal access token with `repo` scope |
+| `TS_AUTHKEY` | Reusable auth key from https://login.tailscale.com/admin/settings/keys |
 
-## What It Does
+### GitHub Actions Auto-Deploy (optional)
 
-1. **Preflight** - Verifies Proxmox host, SSH keys, optional CF/GH tokens
-2. **LXC Creation** - Creates a Debian 12 unprivileged container
-3. **System Setup** - Installs Ruby, nginx, build tools
-4. **App Deployment** - Clones repo, bundles, migrates, precompiles
-5. **Deploy User** - Creates `deploy` user with SSH keys and sudoers
-6. **Services** - Configures systemd + nginx reverse proxy
-7. **Cloudflare** *(if configured)* - Creates tunnel via API, installs cloudflared daemon, sets up DNS
-8. **GitHub Actions** *(if configured)* - Pushes workflow file, sets deployment secrets
+Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH access.
+
+| Setting | Description |
+|---------|-------------|
+| `GH_PAT` | GitHub personal access token with `repo` + `workflow` scope |
 
 ## Project Structure
 
 ```
 deploy                 # Main orchestrator
-generate               # Builds single-file scripts from modules
+bootstrap.sh           # One-liner bootstrap (clones repo + runs deploy)
+generate               # Builds single-file paste-able scripts
 deploy.conf.example    # Config template
 lib/
-  common.sh            # Colors, logging, template rendering
-  config.sh            # Config loading + validation
-  preflight.sh         # Pre-deployment checks
-  lxc.sh               # LXC container lifecycle
-  deps.sh              # System dependencies
-  ruby.sh              # Ruby/chruby installation
-  app.sh               # App cloning + deployment
-  deploy-user.sh       # Deploy user setup
-  systemd.sh           # Systemd service
-  nginx.sh             # Nginx reverse proxy
+  common.sh            # Colors, logging, spinners, template rendering
+  config.sh            # Config loading, prompts, secrets management
+  preflight.sh         # SSH key generation, GitHub access verification
+  lxc.sh               # LXC container lifecycle + TUN device setup
+  deps.sh              # System dependencies (with progress)
+  ruby.sh              # ruby-install, chruby, Ruby compilation
+  app.sh               # App cloning, bundling, database, assets
+  deploy-user.sh       # Deploy user + SSH keys + GitHub access
+  systemd.sh           # Systemd service from template
+  nginx.sh             # Nginx reverse proxy from template
   cloudflare.sh        # Cloudflare tunnel via API
+  tailscale.sh         # Tailscale VPN setup in container
   github-actions.sh    # GitHub Actions workflow + secrets
 templates/
   systemd.service.tmpl # Puma unit file
   nginx.conf.tmpl      # Nginx site config
   cloudflared.yml.tmpl # cloudflared tunnel config
-  deploy.yml.tmpl      # GitHub Actions workflow
+  deploy.yml.tmpl      # GitHub Actions workflow (Tailscale + SSH)
 rails-app.sh           # Legacy monolithic script (reference)
 ```
 
 ## Prerequisites
 
-- Proxmox VE host with `pct` available
-- SSH key on the Proxmox host for GitHub access (`/root/.ssh/id_ed25519` or `id_rsa`)
+- Proxmox VE host with `pct` and internet access
+- SSH key on the Proxmox host added to GitHub
 - *(Optional)* Cloudflare account with API token
-- *(Optional)* GitHub PAT with `repo` scope
+- *(Optional)* Tailscale account with reusable auth key
+- *(Optional)* GitHub PAT with `repo` + `workflow` scope
 
 ## After Deployment
 
 ```
 App:         budgeter
-Container:   101
-IP:          192.168.1.50
-URL:         https://budgeter.example.com  (or http://192.168.1.50)
-SSH:         ssh deploy@192.168.1.50
-Redeploy:    ssh deploy@192.168.1.50 '/opt/budgeter/bin/deploy'
-```
-
-## Manual Redeploy
-
-```bash
-ssh deploy@<container-ip> '/opt/<app-name>/bin/deploy'
+Container:   107
+LXC IP:      192.168.2.74
+Tailscale:   100.118.249.29
+URL:         https://budgeter.joenguyen.ca
+SSH:         ssh deploy@100.118.249.29
+Redeploy:    ssh deploy@100.118.249.29 '/opt/budgeter/bin/deploy'
 ```
 
 ## Managing Containers
 
 ```bash
-# View logs
-pct exec <ctid> -- journalctl -u <app-name> -f
-
-# Restart the app
-pct exec <ctid> -- systemctl restart <app-name>
-
-# Shell into the container
-pct enter <ctid>
-
-# Stop/start container
-pct stop <ctid>
-pct start <ctid>
+pct exec <ctid> -- journalctl -u <app-name> -f    # View logs
+pct exec <ctid> -- systemctl restart <app-name>    # Restart app
+pct enter <ctid>                                    # Shell into container
+pct stop <ctid> && pct destroy <ctid>              # Remove container
 ```
 
 ## Deploying Multiple Apps
 
-Run the deploy once per app. Each gets its own LXC container:
+Run the one-liner once per app. Tokens are saved and reused automatically:
 
 ```bash
-# With config file - change REPO_NAME and re-run
-./deploy
-
-# With one-liner - prompted each time
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
+# Enter: hub (or whatever app)
+# Everything else is pre-filled from saved secrets
 ```
