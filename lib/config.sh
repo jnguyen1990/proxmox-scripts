@@ -3,18 +3,10 @@
 
 SECRETS_FILE="/root/.proxmox-deploy-secrets"
 
-# Prompt for a value only if the variable is empty
-_prompt_if_empty() {
+_read_value() {
   local label="$1"
-  local varname="$2"
-
-  if [[ -n "${!varname:-}" ]]; then
-    info "${label}: (saved) ****${!varname: -4}"
-    return
-  fi
-
-  read -rp "$(echo -e "${BOLD}${label}${NC}: ")" "${varname}"
-  [[ -z "${!varname}" ]] && error "${varname} is required"
+  read -rp "$(echo -e "${BOLD}${label}${NC}: ")" _read_result
+  [[ -z "${_read_result}" ]] && error "${label} is required"
 }
 
 # Offer to save tokens/IDs for future deploys
@@ -140,10 +132,26 @@ load_config() {
       read -rp "$(echo -e "${BOLD}Set up Cloudflare Tunnel?${NC} [y/N]: ")" _cf
     fi
     if [[ "${_cf,,}" == "y" ]]; then
-      _prompt_if_empty "Cloudflare API token" CF_API_TOKEN
-      _prompt_if_empty "Cloudflare Account ID" CF_ACCOUNT_ID
-      _prompt_if_empty "Cloudflare Zone ID" CF_ZONE_ID
-      _prompt_if_empty "Domain (e.g. example.com)" CF_DOMAIN
+      if [[ -n "${CF_API_TOKEN:-}" ]]; then
+        info "Cloudflare API token: (saved) ****${CF_API_TOKEN: -4}"
+      else
+        _read_value "Cloudflare API token"; CF_API_TOKEN="${_read_result}"
+      fi
+      if [[ -n "${CF_ACCOUNT_ID:-}" ]]; then
+        info "Cloudflare Account ID: (saved) ****${CF_ACCOUNT_ID: -4}"
+      else
+        _read_value "Cloudflare Account ID"; CF_ACCOUNT_ID="${_read_result}"
+      fi
+      if [[ -n "${CF_ZONE_ID:-}" ]]; then
+        info "Cloudflare Zone ID: (saved) ****${CF_ZONE_ID: -4}"
+      else
+        _read_value "Cloudflare Zone ID"; CF_ZONE_ID="${_read_result}"
+      fi
+      if [[ -n "${CF_DOMAIN:-}" ]]; then
+        info "Domain: ${CF_DOMAIN}"
+      else
+        _read_value "Domain (e.g. example.com)"; CF_DOMAIN="${_read_result}"
+      fi
 
       read -rp "$(echo -e "${BOLD}Subdomain${NC} [${REPO_NAME}]: ")" _sub
       CF_SUBDOMAIN="${_sub:-${REPO_NAME}}"
@@ -159,7 +167,11 @@ load_config() {
       read -rp "$(echo -e "${BOLD}Set up GitHub Actions auto-deploy?${NC} [y/N]: ")" _gh
     fi
     if [[ "${_gh,,}" == "y" ]]; then
-      _prompt_if_empty "GitHub personal access token" GH_PAT
+      if [[ -n "${GH_PAT:-}" ]]; then
+        info "GitHub token: (saved) ****${GH_PAT: -4}"
+      else
+        _read_value "GitHub personal access token"; GH_PAT="${_read_result}"
+      fi
     fi
 
     # ── Offer to save secrets ──
