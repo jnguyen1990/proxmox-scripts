@@ -65,6 +65,14 @@ GH_PAT="${GH_PAT}"
 EOF
   fi
 
+  if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
+    cat >> "${SECRETS_FILE}" << EOF
+
+# Rails
+RAILS_MASTER_KEY="${RAILS_MASTER_KEY}"
+EOF
+  fi
+
   chmod 600 "${SECRETS_FILE}"
 }
 
@@ -123,6 +131,14 @@ load_config() {
 
     read -rp "$(echo -e "${BOLD}Storage pool${NC} [${STORAGE}]: ")" _storage
     STORAGE="${_storage:-${STORAGE}}"
+
+    # ── Rails Master Key ──
+    if [[ -z "${RAILS_MASTER_KEY:-}" ]]; then
+      echo ""
+      read -rp "$(echo -e "${BOLD}Rails master key${NC} (from config/master.key, or Enter to skip): ")" RAILS_MASTER_KEY
+    else
+      info "Rails master key: (saved) ****${RAILS_MASTER_KEY: -4}"
+    fi
 
     # ── Cloudflare Tunnel ──
     echo ""

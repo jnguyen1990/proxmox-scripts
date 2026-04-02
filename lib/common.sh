@@ -65,6 +65,7 @@ render_template() {
     -e "s|{{CF_DOMAIN}}|${CF_DOMAIN:-}|g" \
     -e "s|{{CF_SUBDOMAIN}}|${CF_SUBDOMAIN:-}|g" \
     -e "s|{{NGINX_LISTEN}}|${NGINX_LISTEN:-80}|g" \
+    -e "s|{{RAILS_MASTER_KEY}}|${RAILS_MASTER_KEY:-}|g" \
     "${template}"
 }
 

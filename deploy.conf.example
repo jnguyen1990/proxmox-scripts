@@ -33,6 +33,11 @@ REPO_NAME=""
 # Proxmox storage pool (default: local-lvm)
 # STORAGE="local-lvm"
 
+# ── Rails Master Key (optional) ─────────────────────────────────────────────
+# Contents of config/master.key from your Rails app.
+# Needed to decrypt credentials in production.
+# RAILS_MASTER_KEY=""
+
 # ── Cloudflare Tunnel (optional) ───────────────────────────────────────────
 # Leave empty to skip Cloudflare tunnel setup.
 # When configured, traffic routes through Cloudflare's network instead of
