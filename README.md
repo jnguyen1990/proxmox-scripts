@@ -1,91 +1,129 @@
 # Proxmox Rails App Deployer
 
-One-command LXC container creation and Rails app deployment for Proxmox VE.
+Modular LXC container creation and Rails app deployment for Proxmox VE, with optional Cloudflare tunnel and GitHub Actions auto-deploy.
 
 ## Quick Start
 
-SSH into your Proxmox host and run:
+### Option 1: One-liner (paste into Proxmox VE shell)
 
 ```bash
-bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/rails-app.sh)"
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
 ```
 
-The script will prompt you for:
+Downloads the repo, prompts for config, and deploys.
 
-| Prompt | Default | Description |
-|--------|---------|-------------|
-| Repo name | *(required)* | GitHub repo name (e.g. `hub`, `budgeter`) |
-| Port | `3000` | Internal app port (nginx proxies 80 to this) |
-| RAM | `1024` MB | Container memory |
-| Disk | `4` GB | Container disk size |
-| CPU cores | `1` | Container CPU cores |
-| Storage pool | `local-lvm` | Proxmox storage pool |
+### Option 2: Generate a custom script
+
+```bash
+git clone git@github.com:jnguyen1990/proxmox-scripts.git
+cd proxmox-scripts
+cp deploy.conf.example deploy.conf
+vim deploy.conf  # fill in your values
+./generate       # outputs dist/deploy-{repo-name}.sh
+```
+
+Then paste the generated script into Proxmox VE or transfer it.
+
+### Option 3: Run from cloned repo on Proxmox
+
+```bash
+git clone git@github.com:jnguyen1990/proxmox-scripts.git /tmp/proxmox-scripts
+cd /tmp/proxmox-scripts
+cp deploy.conf.example deploy.conf
+vim deploy.conf
+./deploy
+```
+
+## Configuration
+
+Copy `deploy.conf.example` to `deploy.conf`. Required and optional settings:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `REPO_NAME` | *(required)* | GitHub repo name (e.g. `hub`, `budgeter`) |
+| `GITHUB_USER` | `jnguyen1990` | GitHub username |
+| `APP_PORT` | `3000` | Internal app port |
+| `RUBY_VERSION` | `3.3.11` | Ruby version to install |
+| `LXC_RAM` | `1024` | Container RAM in MB |
+| `LXC_DISK` | `4` | Container disk in GB |
+| `LXC_CORES` | `1` | Container CPU cores |
+| `STORAGE` | `local-lvm` | Proxmox storage pool |
+
+### Cloudflare Tunnel (optional)
+
+Route traffic through Cloudflare's network instead of exposing ports directly.
+
+| Setting | Description |
+|---------|-------------|
+| `CF_API_TOKEN` | Cloudflare API token (needs Tunnel Edit + DNS Edit) |
+| `CF_ACCOUNT_ID` | Cloudflare account ID |
+| `CF_ZONE_ID` | Zone ID for your domain |
+| `CF_DOMAIN` | Base domain (e.g. `example.com`) |
+| `CF_SUBDOMAIN` | Subdomain (defaults to `REPO_NAME`) |
+
+### GitHub Actions Auto-Deploy (optional)
+
+Automatically push a deploy workflow and set secrets on your repo.
+
+| Setting | Description |
+|---------|-------------|
+| `GH_PAT` | GitHub personal access token with `repo` scope |
 
 ## What It Does
 
-1. Creates a Debian 12 LXC container on your Proxmox host
-2. Installs Ruby 3.3.11, nginx, and system dependencies
-3. Clones your repo from `github.com/jnguyen1990/{repo}`
-4. Runs `bundle install`, `db:migrate`, and `assets:precompile`
-5. Creates a systemd service for Puma
-6. Configures nginx as a reverse proxy (port 80 → app)
-7. Creates a `deploy` user with an SSH key for GitHub Actions
-8. Prints everything you need to set up auto-deploy
+1. **Preflight** - Verifies Proxmox host, SSH keys, optional CF/GH tokens
+2. **LXC Creation** - Creates a Debian 12 unprivileged container
+3. **System Setup** - Installs Ruby, nginx, build tools
+4. **App Deployment** - Clones repo, bundles, migrates, precompiles
+5. **Deploy User** - Creates `deploy` user with SSH keys and sudoers
+6. **Services** - Configures systemd + nginx reverse proxy
+7. **Cloudflare** *(if configured)* - Creates tunnel via API, installs cloudflared daemon, sets up DNS
+8. **GitHub Actions** *(if configured)* - Pushes workflow file, sets deployment secrets
+
+## Project Structure
+
+```
+deploy                 # Main orchestrator
+generate               # Builds single-file scripts from modules
+deploy.conf.example    # Config template
+lib/
+  common.sh            # Colors, logging, template rendering
+  config.sh            # Config loading + validation
+  preflight.sh         # Pre-deployment checks
+  lxc.sh               # LXC container lifecycle
+  deps.sh              # System dependencies
+  ruby.sh              # Ruby/chruby installation
+  app.sh               # App cloning + deployment
+  deploy-user.sh       # Deploy user setup
+  systemd.sh           # Systemd service
+  nginx.sh             # Nginx reverse proxy
+  cloudflare.sh        # Cloudflare tunnel via API
+  github-actions.sh    # GitHub Actions workflow + secrets
+templates/
+  systemd.service.tmpl # Puma unit file
+  nginx.conf.tmpl      # Nginx site config
+  cloudflared.yml.tmpl # cloudflared tunnel config
+  deploy.yml.tmpl      # GitHub Actions workflow
+rails-app.sh           # Legacy monolithic script (reference)
+```
 
 ## Prerequisites
 
 - Proxmox VE host with `pct` available
-- SSH key on the Proxmox host that has access to your GitHub repos (`/root/.ssh/id_ed25519` or `/root/.ssh/id_rsa`)
+- SSH key on the Proxmox host for GitHub access (`/root/.ssh/id_ed25519` or `id_rsa`)
+- *(Optional)* Cloudflare account with API token
+- *(Optional)* GitHub PAT with `repo` scope
 
 ## After Deployment
-
-The script prints a summary like this:
 
 ```
 App:         budgeter
 Container:   101
 IP:          192.168.1.50
-URL:         http://192.168.1.50
+URL:         https://budgeter.example.com  (or http://192.168.1.50)
 SSH:         ssh deploy@192.168.1.50
 Redeploy:    ssh deploy@192.168.1.50 '/opt/budgeter/bin/deploy'
 ```
-
-It also prints a **deploy private key**. Save this for GitHub Actions.
-
-## Setting Up Auto-Deploy
-
-1. Go to your GitHub repo → Settings → Secrets and variables → Actions
-2. Add these repository secrets:
-
-| Secret | Value |
-|--------|-------|
-| `DEPLOY_HOST` | Container IP address |
-| `DEPLOY_USER` | `deploy` |
-| `DEPLOY_SSH_KEY` | The private key printed by the script |
-
-3. Add this workflow to your repo at `.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: /opt/<your-app-name>/bin/deploy
-```
-
-Now every push to `main` automatically deploys.
 
 ## Manual Redeploy
 
@@ -93,7 +131,7 @@ Now every push to `main` automatically deploys.
 ssh deploy@<container-ip> '/opt/<app-name>/bin/deploy'
 ```
 
-## Managing the Container
+## Managing Containers
 
 ```bash
 # View logs
@@ -112,25 +150,12 @@ pct start <ctid>
 
 ## Deploying Multiple Apps
 
-Run the script once per app. Each gets its own LXC container:
+Run the deploy once per app. Each gets its own LXC container:
 
 ```bash
-# First run - deploy hub
-bash rails-app.sh
-# Enter: hub
+# With config file - change REPO_NAME and re-run
+./deploy
 
-# Second run - deploy budgeter
-bash rails-app.sh
-# Enter: budgeter
-```
-
-## Loading Existing Data
-
-For the budgeter app, if you have an existing `budgeter.db` from the Flask version:
-
-```bash
-scp budgeter.db deploy@<container-ip>:/tmp/
-ssh deploy@<container-ip>
-cd /opt/budgeter
-LEGACY_DB=/tmp/budgeter.db RAILS_ENV=production bundle exec rails db:import_legacy
+# With one-liner - prompted each time
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
 ```

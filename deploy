@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# Proxmox LXC Deploy Orchestrator
+#
+# Usage (from Proxmox VE shell):
+#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/deploy)"
+#
+# Or from a cloned repo:
+#   ./deploy
+# ============================================================================
+
+set -euo pipefail
+
+# ── Determine script location ───────────────────────────────────────────────
+# If run via wget/curl one-liner, bootstrap by cloning the repo
+if [[ "${BASH_SOURCE[0]}" == "bash" ]] || [[ ! -f "${BASH_SOURCE[0]}" ]]; then
+  # Running via bash -c "$(wget ...)" -- need to clone repo first
+  BOOTSTRAP_DIR="/tmp/proxmox-scripts"
+  if [[ ! -d "${BOOTSTRAP_DIR}/lib" ]]; then
+    echo "Downloading deploy scripts..."
+    apt-get install -y -qq git >/dev/null 2>&1 || true
+    rm -rf "${BOOTSTRAP_DIR}"
+    git clone --depth 1 https://github.com/jnguyen1990/proxmox-scripts.git "${BOOTSTRAP_DIR}" 2>/dev/null
+  fi
+  SCRIPT_DIR="${BOOTSTRAP_DIR}"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+# ── Source modules ──────────────────────────────────────────────────────────
+source "${SCRIPT_DIR}/lib/common.sh"
+source "${SCRIPT_DIR}/lib/config.sh"
+source "${SCRIPT_DIR}/lib/preflight.sh"
+source "${SCRIPT_DIR}/lib/lxc.sh"
+source "${SCRIPT_DIR}/lib/deps.sh"
+source "${SCRIPT_DIR}/lib/ruby.sh"
+source "${SCRIPT_DIR}/lib/app.sh"
+source "${SCRIPT_DIR}/lib/deploy-user.sh"
+source "${SCRIPT_DIR}/lib/systemd.sh"
+source "${SCRIPT_DIR}/lib/nginx.sh"
+source "${SCRIPT_DIR}/lib/cloudflare.sh"
+source "${SCRIPT_DIR}/lib/github-actions.sh"
+
+# ── Phase 1: Configuration ─────────────────────────────────────────────────
+header "Proxmox LXC Deploy"
+load_config
+validate_config
+
+# ── Phase 2: Preflight ─────────────────────────────────────────────────────
+run_preflight
+
+# ── Phase 3: LXC Container ─────────────────────────────────────────────────
+header "Creating LXC Container"
+lxc_next_id
+lxc_ensure_template
+lxc_create
+lxc_start
+lxc_push_ssh_keys
+
+# ── Phase 4: System Setup ──────────────────────────────────────────────────
+install_system_deps
+install_ruby
+
+# ── Phase 5: App Deployment ─────────────────────────────────────────────────
+deploy_app
+create_deploy_user
+create_deploy_script
+
+# ── Phase 6: Services ──────────────────────────────────────────────────────
+setup_systemd
+setup_nginx
+
+# ── Phase 7: Cloudflare Tunnel (conditional) ────────────────────────────────
+cf_setup
+
+# ── Phase 8: GitHub Actions (conditional) ───────────────────────────────────
+gh_setup
+
+# ── Phase 9: Summary ───────────────────────────────────────────────────────
+header "Deployment Complete!"
+echo -e "${GREEN}${BOLD}App:${NC}         ${REPO_NAME}"
+echo -e "${GREEN}${BOLD}Container:${NC}   ${CTID}"
+echo -e "${GREEN}${BOLD}IP:${NC}          ${LXC_IP}"
+
+if [[ -n "${CF_API_TOKEN:-}" ]]; then
+  echo -e "${GREEN}${BOLD}URL:${NC}         https://${CF_SUBDOMAIN:-${REPO_NAME}}.${CF_DOMAIN}"
+else
+  echo -e "${GREEN}${BOLD}URL:${NC}         http://${LXC_IP}"
+fi
+
+echo -e "${GREEN}${BOLD}App Dir:${NC}     ${APP_DIR}"
+echo -e "${GREEN}${BOLD}SSH:${NC}         ssh deploy@${LXC_IP}"
+echo -e "${GREEN}${BOLD}Logs:${NC}        pct exec ${CTID} -- journalctl -u ${REPO_NAME} -f"
+echo -e "${GREEN}${BOLD}Redeploy:${NC}    ssh deploy@${LXC_IP} '${APP_DIR}/bin/deploy'"
+
+# If GitHub Actions wasn't configured, print the deploy key for manual setup
+if [[ -z "${GH_PAT:-}" ]]; then
+  DEPLOY_KEY=$(get_deploy_private_key)
+
+  echo ""
+  echo -e "${YELLOW}${BOLD}── GitHub Actions Setup ──${NC}"
+  echo -e "Add these secrets to your GitHub repo (${GITHUB_USER}/${REPO_NAME}):"
+  echo -e "  ${BOLD}DEPLOY_HOST${NC}     = ${LXC_IP}"
+  echo -e "  ${BOLD}DEPLOY_USER${NC}     = deploy"
+  echo -e "  ${BOLD}DEPLOY_SSH_KEY${NC}  = (the private key below)"
+  echo ""
+  echo -e "${YELLOW}${BOLD}── Deploy Private Key (copy this to GitHub Secrets) ──${NC}"
+  echo -e "${RED}Save this now - it won't be shown again!${NC}"
+  echo ""
+  echo "${DEPLOY_KEY}"
+fi
+
+echo ""
+echo -e "${GREEN}${BOLD}Done!${NC}"

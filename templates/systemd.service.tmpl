@@ -1,0 +1,23 @@
+[Unit]
+Description={{REPO_NAME}} Rails App
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory={{APP_DIR}}
+Environment=RAILS_ENV=production
+Environment=PATH=/opt/rubies/ruby-{{RUBY_VERSION}}/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GEM_HOME=/opt/rubies/ruby-{{RUBY_VERSION}}/lib/ruby/gems/3.3.0
+Environment=PORT={{APP_PORT}}
+Environment=RAILS_LOG_TO_STDOUT=1
+Environment=SOLID_QUEUE_IN_PUMA=true
+ExecStart=/opt/rubies/ruby-{{RUBY_VERSION}}/bin/bundle exec puma -C config/puma.rb
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

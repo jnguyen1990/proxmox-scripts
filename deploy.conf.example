@@ -1,0 +1,69 @@
+# ============================================================================
+# Proxmox Deploy Configuration
+# Copy this to deploy.conf and fill in your values
+# ============================================================================
+
+# ── Required ────────────────────────────────────────────────────────────────
+
+# GitHub repository name (e.g. "hub", "budgeter")
+REPO_NAME=""
+
+# ── App Settings ────────────────────────────────────────────────────────────
+
+# GitHub username (default: jnguyen1990)
+# GITHUB_USER="jnguyen1990"
+
+# Internal app port (default: 3000)
+# APP_PORT="3000"
+
+# Ruby version to install (default: 3.3.11)
+# RUBY_VERSION="3.3.11"
+
+# ── LXC Container Specs ────────────────────────────────────────────────────
+
+# RAM in MB (default: 1024)
+# LXC_RAM="1024"
+
+# Disk in GB (default: 4)
+# LXC_DISK="4"
+
+# CPU cores (default: 1)
+# LXC_CORES="1"
+
+# Proxmox storage pool (default: local-lvm)
+# STORAGE="local-lvm"
+
+# ── Cloudflare Tunnel (optional) ───────────────────────────────────────────
+# Leave empty to skip Cloudflare tunnel setup.
+# When configured, traffic routes through Cloudflare's network instead of
+# exposing ports directly.
+#
+# Required API token permissions:
+#   - Account > Cloudflare Tunnel > Edit
+#   - Zone > DNS > Edit
+
+# Cloudflare API token
+# CF_API_TOKEN=""
+
+# Cloudflare account ID (found in dashboard URL or API)
+# CF_ACCOUNT_ID=""
+
+# Cloudflare zone ID for your domain
+# CF_ZONE_ID=""
+
+# Base domain (e.g. "example.com")
+# CF_DOMAIN=""
+
+# Subdomain for this app (e.g. "hub" -> hub.example.com)
+# Defaults to REPO_NAME if not set
+# CF_SUBDOMAIN=""
+
+# ── GitHub Actions Auto-Deploy (optional) ──────────────────────────────────
+# Leave empty to skip. When set, the deploy script will:
+#   1. Add deployment secrets to your GitHub repo
+#   2. Push a GitHub Actions workflow file for auto-deploy on push to main
+#
+# Required token permissions: repo (full control)
+
+# GitHub personal access token
+# GH_PAT=""
