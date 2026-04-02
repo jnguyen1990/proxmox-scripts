@@ -181,7 +181,7 @@ cf_create_access_app() {
   # Check for existing app on this domain
   local app_id=""
   if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/apps"; then
-    app_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"domain\":\"${subdomain}.${CF_DOMAIN}\"[^}]*}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    app_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"domain\":\"${subdomain}.${CF_DOMAIN}\"[^}]*}" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   fi
 
   if [[ -n "${app_id}" ]]; then
@@ -205,7 +205,7 @@ cf_create_access_app() {
   local token_id=""
   if cf_api_optional GET "/accounts/${CF_ACCOUNT_ID}/access/service_tokens"; then
     # Look for existing deploy token
-    token_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"name\":\"proxmox-deploy\"[^}]*}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+    token_id=$(echo "${CF_API_BODY}" | grep -o "{[^}]*\"name\":\"proxmox-deploy\"[^}]*}" | grep -o '"client_id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
     if [[ -n "${token_id}" ]]; then
       CF_ACCESS_CLIENT_ID="${token_id}"
       info "Existing service token found (proxmox-deploy), but secret is not retrievable"
