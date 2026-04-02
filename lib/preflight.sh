@@ -15,7 +15,7 @@ preflight_check_ssh_key() {
     info "Generate one with: ssh-keygen -t ed25519"
     info "Then add the public key to your GitHub account."
     read -rp "$(echo -e "${BOLD}Continue without SSH key? [y/N]${NC} ")" _continue
-    [[ "${_continue,,}" != "y" ]] && exit 1
+    if [[ "${_continue,,}" != "y" ]]; then exit 1; fi
   fi
 }
 

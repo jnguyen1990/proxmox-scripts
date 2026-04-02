@@ -6,7 +6,9 @@ SECRETS_FILE="/root/.proxmox-deploy-secrets"
 _read_value() {
   local label="$1"
   read -rp "$(echo -e "${BOLD}${label}${NC}: ")" _read_result
-  [[ -z "${_read_result}" ]] && error "${label} is required"
+  if [[ -z "${_read_result}" ]]; then
+    error "${label} is required"
+  fi
 }
 
 # Offer to save tokens/IDs for future deploys
@@ -88,7 +90,7 @@ load_config() {
   # Interactive prompts for missing required values
   if [[ -z "${REPO_NAME:-}" ]]; then
     read -rp "$(echo -e "${BOLD}GitHub repo name${NC} (e.g. hub, budgeter): ")" REPO_NAME
-    [[ -z "${REPO_NAME}" ]] && error "Repo name is required"
+    if [[ -z "${REPO_NAME}" ]]; then error "Repo name is required"; fi
   fi
 
   # Defaults for optional values
@@ -180,8 +182,8 @@ load_config() {
 }
 
 validate_config() {
-  [[ -z "${REPO_NAME:-}" ]] && error "REPO_NAME is required"
-  [[ -z "${GITHUB_USER:-}" ]] && error "GITHUB_USER is required"
+  if [[ -z "${REPO_NAME:-}" ]]; then error "REPO_NAME is required"; fi
+  if [[ -z "${GITHUB_USER:-}" ]]; then error "GITHUB_USER is required"; fi
 
   echo ""
   info "App: ${REPO_NAME}"
@@ -196,6 +198,6 @@ validate_config() {
   # Only prompt for confirmation in interactive mode
   if [[ ! -f "${SCRIPT_DIR}/deploy.conf" ]]; then
     read -rp "$(echo -e "${BOLD}Proceed? [Y/n]${NC} ")" CONFIRM
-    [[ "${CONFIRM,,}" == "n" ]] && exit 0
+    if [[ "${CONFIRM,,}" == "n" ]]; then exit 0; fi
   fi
 }
