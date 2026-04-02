@@ -42,7 +42,7 @@ deploy_app() {
 create_deploy_script() {
   header "Creating Deploy Script"
 
-  pct exec "${CTID}" -- bash -c "cat > ${APP_DIR}/bin/deploy << 'DEPLOY_EOF'
+  pct exec "${CTID}" -- bash -c "mkdir -p ${APP_DIR}/bin && cat > ${APP_DIR}/bin/deploy << 'DEPLOY_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
