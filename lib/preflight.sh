@@ -12,10 +12,43 @@ preflight_check_ssh_key() {
     success "SSH key found: /root/.ssh/id_rsa"
   else
     warn "No SSH key found on this Proxmox host."
-    info "Generate one with: ssh-keygen -t ed25519"
-    info "Then add the public key to your GitHub account."
-    read -rp "$(echo -e "${BOLD}Continue without SSH key? [y/N]${NC} ")" _continue
-    if [[ "${_continue,,}" != "y" ]]; then exit 1; fi
+    info "Generating ed25519 SSH key..."
+    ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N '' -C "proxmox@$(hostname)" -q
+    success "SSH key generated"
+  fi
+
+  # Show public key and verify it's on GitHub
+  local pubkey
+  if [[ -f /root/.ssh/id_ed25519.pub ]]; then
+    pubkey=$(cat /root/.ssh/id_ed25519.pub)
+  else
+    pubkey=$(cat /root/.ssh/id_rsa.pub)
+  fi
+
+  echo ""
+  echo -e "${YELLOW}${BOLD}── SSH Public Key ──${NC}"
+  echo -e "Add this to GitHub (${CYAN}https://github.com/settings/keys${NC}) if not already added:"
+  echo ""
+  echo "${pubkey}"
+  echo ""
+
+  # Test GitHub SSH access
+  info "Testing GitHub SSH access..."
+  if ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 | grep -q "successfully authenticated"; then
+    success "GitHub SSH access confirmed"
+  else
+    warn "GitHub SSH access failed."
+    echo -e "  1. Copy the public key above"
+    echo -e "  2. Add it at ${CYAN}https://github.com/settings/keys${NC}"
+    echo -e "  3. Click ${BOLD}New SSH key${NC}, paste, and save"
+    echo ""
+    read -rp "$(echo -e "${BOLD}Press Enter once you've added the key (or Ctrl+C to cancel)...${NC}")" _
+    # Re-test
+    if ssh -T git@github.com -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 | grep -q "successfully authenticated"; then
+      success "GitHub SSH access confirmed"
+    else
+      error "Still can't authenticate with GitHub. Check the key was added correctly."
+    fi
   fi
 }
 
