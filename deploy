@@ -14,7 +14,8 @@ set -euo pipefail
 
 # ── Determine script location ───────────────────────────────────────────────
 # If run via wget/curl one-liner, bootstrap by cloning the repo
-if [[ "${BASH_SOURCE[0]}" == "bash" ]] || [[ ! -f "${BASH_SOURCE[0]}" ]]; then
+SELF="${BASH_SOURCE[0]:-}"
+if [[ -z "${SELF}" ]] || [[ "${SELF}" == "bash" ]] || [[ ! -f "${SELF}" ]]; then
   # Running via bash -c "$(wget ...)" -- need to clone repo first
   BOOTSTRAP_DIR="/tmp/proxmox-scripts"
   if [[ ! -d "${BOOTSTRAP_DIR}/lib" ]]; then
