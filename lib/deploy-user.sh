@@ -27,7 +27,32 @@ create_deploy_user() {
       chown -R deploy:deploy /home/deploy/.ssh
     fi
 
-    # Copy GitHub SSH access to deploy user
+    # Copy GitHub SSH key + known_hosts to deploy user so it can git pull
+    if [[ -f /root/.ssh/id_ed25519 ]]; then
+      cp /root/.ssh/id_ed25519 /home/deploy/.ssh/id_ed25519_github
+      cp /root/.ssh/id_ed25519.pub /home/deploy/.ssh/id_ed25519_github.pub
+      chmod 600 /home/deploy/.ssh/id_ed25519_github
+      chown deploy:deploy /home/deploy/.ssh/id_ed25519_github*
+      # Configure SSH to use this key for GitHub
+      cat > /home/deploy/.ssh/config << 'SSHCFG'
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_github
+  StrictHostKeyChecking accept-new
+SSHCFG
+      chown deploy:deploy /home/deploy/.ssh/config
+      chmod 600 /home/deploy/.ssh/config
+    elif [[ -f /root/.ssh/id_rsa ]]; then
+      cp /root/.ssh/id_rsa /home/deploy/.ssh/id_rsa_github
+      chmod 600 /home/deploy/.ssh/id_rsa_github
+      chown deploy:deploy /home/deploy/.ssh/id_rsa_github
+      cat > /home/deploy/.ssh/config << 'SSHCFG'
+Host github.com
+  IdentityFile ~/.ssh/id_rsa_github
+  StrictHostKeyChecking accept-new
+SSHCFG
+      chown deploy:deploy /home/deploy/.ssh/config
+      chmod 600 /home/deploy/.ssh/config
+    fi
     cp /root/.ssh/known_hosts /home/deploy/.ssh/known_hosts 2>/dev/null || true
     chown deploy:deploy /home/deploy/.ssh/known_hosts 2>/dev/null || true
 
