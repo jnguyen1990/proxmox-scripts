@@ -270,7 +270,7 @@ if [[ -n "${CF_API_TOKEN:-}" ]]; then
 fi
 
 # ── 13. Tailscale (conditional) ─────────────────────────────────────────────
-if [[ -n "${TS_AUTHKEY:-}" ]]; then
+if [[ -n "${TS_AUTHKEY:-}" || -n "${TS_OAUTH_CLIENT_ID:-}" ]]; then
   TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
   if [[ -n "${TS_IP}" ]]; then
     check_ok "Tailscale connected (${TS_IP})"
