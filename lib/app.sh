@@ -26,14 +26,15 @@ deploy_app() {
     "
 
   info "Setting up database..."
+  # Write master key first (separate command to avoid quoting issues)
+  if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
+    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+  fi
   pct exec "${CTID}" -- bash -c "set -e
     export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
     export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
     cd ${APP_DIR}
-    if [[ -n \"${RAILS_MASTER_KEY:-}\" ]]; then
-      echo \"${RAILS_MASTER_KEY}\" > config/master.key
-      chmod 600 config/master.key
-    elif [[ ! -f config/master.key ]]; then
+    if [[ ! -f config/master.key ]]; then
       EDITOR='echo' rails credentials:edit 2>/dev/null || true
     fi
     RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -3
