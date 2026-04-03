@@ -24,9 +24,11 @@ cf_api() {
 
   if ! [[ "${http_code}" =~ ^[0-9]+$ ]] || [[ "${http_code}" -lt 200 ]] || [[ "${http_code}" -ge 300 ]]; then
     local errors
-    errors=$(echo "${CF_API_BODY}" | grep -o '"message" *: *"[^"]*"' | head -3)
-    error "Cloudflare API error (HTTP ${http_code}): ${errors:-${CF_API_BODY}}"
+    errors=$(echo "${CF_API_BODY}" | grep -o '"message" *: *"[^"]*"' | head -3 || true)
+    warn "Cloudflare API error (HTTP ${http_code}): ${errors:-${CF_API_BODY}}"
+    return 1
   fi
+  return 0
 }
 
 cf_create_tunnel() {
@@ -35,23 +37,26 @@ cf_create_tunnel() {
   local tunnel_name="${REPO_NAME}-tunnel"
 
   # Check if tunnel already exists
-  cf_api GET "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel?name=${tunnel_name}&is_deleted=false"
-  local existing_id
-  existing_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
+  if cf_api GET "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel?name=${tunnel_name}&is_deleted=false"; then
+    local existing_id
+    existing_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
-  if [[ -n "${existing_id}" ]]; then
-    warn "Tunnel '${tunnel_name}' already exists (${existing_id}), deleting old tunnel..."
-    cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${existing_id}"
-    success "Old tunnel deleted"
+    if [[ -n "${existing_id}" ]]; then
+      warn "Tunnel '${tunnel_name}' already exists (${existing_id}), deleting old tunnel..."
+      cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${existing_id}" || true
+      success "Old tunnel deleted"
+    fi
   fi
 
   # Generate a random 32-byte secret
   TUNNEL_SECRET=$(openssl rand -base64 32)
 
-  cf_api POST "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel" \
-    "{\"name\":\"${tunnel_name}\",\"tunnel_secret\":\"${TUNNEL_SECRET}\",\"config_src\":\"local\"}"
+  if ! cf_api POST "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel" \
+    "{\"name\":\"${tunnel_name}\",\"tunnel_secret\":\"${TUNNEL_SECRET}\",\"config_src\":\"local\"}"; then
+    error "Failed to create tunnel: ${CF_API_BODY}"
+  fi
 
-  TUNNEL_ID=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
+  TUNNEL_ID=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
   if [[ -z "${TUNNEL_ID}" ]]; then
     error "Failed to extract tunnel ID from response: ${CF_API_BODY}"
   fi
@@ -64,19 +69,20 @@ cf_create_dns_route() {
   info "Creating DNS record: ${subdomain}.${CF_DOMAIN} -> tunnel..."
 
   # Check if record already exists
-  cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}.${CF_DOMAIN}&type=CNAME"
-  local count
-  count=$(echo "${CF_API_BODY}" | grep -o '"count" *: *[0-9]*' | head -1 | sed 's/.*: *//' || true)
+  if cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}.${CF_DOMAIN}&type=CNAME"; then
+    local count
+    count=$(echo "${CF_API_BODY}" | grep -o '"count" *: *[0-9]*' | head -1 | sed 's/.*: *//' || true)
 
-  if [[ "${count:-0}" -gt 0 ]]; then
-    warn "DNS record for ${subdomain}.${CF_DOMAIN} already exists, updating..."
-    local record_id
-    record_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4)
-    cf_api PUT "/zones/${CF_ZONE_ID}/dns_records/${record_id}" \
-      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}"
-  else
-    cf_api POST "/zones/${CF_ZONE_ID}/dns_records" \
-      "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}"
+    if [[ "${count:-0}" -gt 0 ]]; then
+      warn "DNS record for ${subdomain}.${CF_DOMAIN} already exists, updating..."
+      local record_id
+      record_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+      cf_api PUT "/zones/${CF_ZONE_ID}/dns_records/${record_id}" \
+        "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}" || true
+    else
+      cf_api POST "/zones/${CF_ZONE_ID}/dns_records" \
+        "{\"type\":\"CNAME\",\"name\":\"${subdomain}\",\"content\":\"${TUNNEL_ID}.cfargotunnel.com\",\"proxied\":true}" || true
+    fi
   fi
 
   success "DNS record created: ${subdomain}.${CF_DOMAIN}"
