@@ -2,17 +2,35 @@
 
 Modular LXC container creation and Rails app deployment for Proxmox VE, with optional Cloudflare tunnel, Tailscale VPN, and GitHub Actions auto-deploy.
 
-## Quick Start
+## Commands
 
-SSH into your Proxmox host and run:
+All commands are one-liners pasted into the Proxmox VE shell:
+
+### Deploy a new app
 
 ```bash
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 ```
 
-The script prompts for everything. Tokens and keys are saved to `/root/.proxmox-deploy-secrets` so you only enter them once.
+Creates a new LXC container and deploys a Rails app end-to-end. Prompts for everything. Tokens and keys are saved to `/root/.proxmox-deploy-secrets` so you only enter them once.
 
-## What It Does
+### Repair a partial deploy
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ repair
+```
+
+Checks an existing container for missing components and fixes them. Useful when `deploy` fails partway through. Checks: system deps, Ruby, app clone, gems, master key, database, deploy user, GitHub SSH access, deploy script, systemd service config, nginx, Cloudflare tunnel, Tailscale, and file ownership.
+
+### Get GitHub Actions setup info
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ setup-github
+```
+
+Prints the secrets, deploy key, and workflow file needed to set up auto-deploy for any container. Use this when the automated GitHub setup fails or you need to add a workflow manually.
+
+## What Deploy Does
 
 1. **Preflight** - Generates/checks SSH key, verifies GitHub access, validates tokens
 2. **LXC Creation** - Creates Debian 12 unprivileged container with TUN device (for Tailscale)
@@ -71,8 +89,10 @@ Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH acce
 ## Project Structure
 
 ```
-deploy                 # Main orchestrator
-bootstrap.sh           # One-liner bootstrap (clones repo + runs deploy)
+deploy                 # Main orchestrator - full deploy from scratch
+repair                 # Check & fix partial deploys
+setup-github           # Print GitHub Actions setup info for a container
+bootstrap.sh           # One-liner bootstrap (clones repo + runs command)
 generate               # Builds single-file paste-able scripts
 deploy.conf.example    # Config template
 lib/
@@ -100,7 +120,7 @@ rails-app.sh           # Legacy monolithic script (reference)
 ## Prerequisites
 
 - Proxmox VE host with `pct` and internet access
-- SSH key on the Proxmox host added to GitHub
+- SSH key on the Proxmox host added to GitHub (auto-generated if missing)
 - *(Optional)* Cloudflare account with API token
 - *(Optional)* Tailscale account with reusable auth key
 - *(Optional)* GitHub PAT with `repo` + `workflow` scope
@@ -128,10 +148,16 @@ pct stop <ctid> && pct destroy <ctid>              # Remove container
 
 ## Deploying Multiple Apps
 
-Run the one-liner once per app. Tokens are saved and reused automatically:
+Run the deploy once per app. Tokens are saved and reused automatically:
 
 ```bash
 bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
 # Enter: hub (or whatever app)
 # Everything else is pre-filled from saved secrets
+```
+
+If a deploy fails partway, run repair instead of starting over:
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ repair
 ```
