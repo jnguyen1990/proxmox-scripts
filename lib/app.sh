@@ -37,7 +37,10 @@ deploy_app() {
     if [[ ! -f config/master.key ]]; then
       EDITOR='echo' rails credentials:edit 2>/dev/null || true
     fi
-    RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -3
+    # Install migrations for Solid Queue/Cache if present
+    bundle exec rails solid_queue:install:migrations 2>/dev/null || true
+    bundle exec rails solid_cache:install:migrations 2>/dev/null || true
+    RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -5
   "
   success "Database ready"
 
