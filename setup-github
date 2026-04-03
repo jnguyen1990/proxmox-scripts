@@ -71,9 +71,8 @@ echo -e "  │ ${GREEN}DEPLOY_HOST${NC}          │ ${BOLD}${DEPLOY_HOST}${NC}"
 echo -e "  │ ${GREEN}DEPLOY_USER${NC}          │ ${BOLD}deploy${NC}"
 echo -e "  │ ${GREEN}DEPLOY_SSH_KEY${NC}       │ ${BOLD}(full private key below)${NC}"
 
-if [[ -n "${TS_AUTHKEY:-}" ]]; then
-echo -e "  │ ${GREEN}TS_AUTHKEY${NC}           │ ${BOLD}${TS_AUTHKEY}${NC}"
-fi
+echo -e "  │ ${GREEN}TS_OAUTH_CLIENT_ID${NC}  │ ${BOLD}(from Tailscale OAuth client)${NC}"
+echo -e "  │ ${GREEN}TS_OAUTH_SECRET${NC}     │ ${BOLD}(from Tailscale OAuth client)${NC}"
 
 echo -e "  └──────────────────────┴─────────────────────────────────────┘"
 
@@ -105,7 +104,8 @@ jobs:
       - name: Connect to Tailscale
         uses: tailscale/github-action@v2
         with:
-          authkey: \${{ secrets.TS_AUTHKEY }}
+          oauth-client-id: \${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: \${{ secrets.TS_OAUTH_SECRET }}
 
       - name: Deploy via SSH
         run: |
