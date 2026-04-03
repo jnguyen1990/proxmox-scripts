@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# GitHub Actions Setup Helper
+# Prints everything needed to set up auto-deploy for a container
+#
+# Usage (from Proxmox VE shell):
+#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ setup-github
+#
+# Or from a cloned repo:
+#   ./setup-github
+# ============================================================================
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+SECRETS_FILE="/root/.proxmox-deploy-secrets"
+if [[ -f "${SECRETS_FILE}" ]]; then
+  source "${SECRETS_FILE}"
+fi
+
+header "GitHub Actions Setup Helper"
+
+# Show running containers
+info "Running containers:"
+echo ""
+pct list | grep -v "^VMID" | while read -r line; do
+  echo "  ${line}"
+done
+echo ""
+
+read -rp "$(echo -e "${BOLD}Container ID${NC}: ")" CTID
+if [[ -z "${CTID}" ]]; then error "CTID is required"; fi
+
+DEFAULT_REPO=$(pct exec "${CTID}" -- hostname 2>/dev/null || echo "")
+read -rp "$(echo -e "${BOLD}Repo name${NC} [${DEFAULT_REPO}]: ")" REPO_NAME
+REPO_NAME="${REPO_NAME:-${DEFAULT_REPO}}"
+
+GITHUB_USER="${GITHUB_USER:-jnguyen1990}"
+APP_DIR="/opt/${REPO_NAME}"
+
+# Get all the info
+DEPLOY_KEY=$(pct exec "${CTID}" -- cat /home/deploy/.ssh/id_ed25519 2>/dev/null || echo "")
+TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
+LXC_IP=$(pct exec "${CTID}" -- hostname -I 2>/dev/null | awk '{print $1}')
+DEPLOY_HOST="${TS_IP:-${LXC_IP}}"
+
+if [[ -z "${DEPLOY_KEY}" ]]; then
+  error "No deploy key found at /home/deploy/.ssh/id_ed25519 in container ${CTID}"
+fi
+
+# ── Print setup instructions ────────────────────────────────────────────────
+echo ""
+echo -e "${YELLOW}${BOLD}══════════════════════════════════════════${NC}"
+echo -e "${YELLOW}${BOLD}  GitHub Actions Setup for ${REPO_NAME}${NC}"
+echo -e "${YELLOW}${BOLD}══════════════════════════════════════════${NC}"
+
+echo ""
+echo -e "${BOLD}Step 1:${NC} Go to your repo's secrets page:"
+echo -e "  ${CYAN}https://github.com/${GITHUB_USER}/${REPO_NAME}/settings/secrets/actions${NC}"
+
+echo ""
+echo -e "${BOLD}Step 2:${NC} Click ${BOLD}\"New repository secret\"${NC} and add each of these:"
+echo ""
+echo -e "  ┌──────────────────────┬─────────────────────────────────────┐"
+echo -e "  │ ${GREEN}Secret Name${NC}          │ ${BOLD}Value${NC}                               │"
+echo -e "  ├──────────────────────┼─────────────────────────────────────┤"
+echo -e "  │ ${GREEN}DEPLOY_HOST${NC}          │ ${BOLD}${DEPLOY_HOST}${NC}"
+echo -e "  │ ${GREEN}DEPLOY_USER${NC}          │ ${BOLD}deploy${NC}"
+echo -e "  │ ${GREEN}DEPLOY_SSH_KEY${NC}       │ ${BOLD}(full private key below)${NC}"
+
+if [[ -n "${TS_AUTHKEY:-}" ]]; then
+echo -e "  │ ${GREEN}TS_AUTHKEY${NC}           │ ${BOLD}${TS_AUTHKEY}${NC}"
+fi
+
+echo -e "  └──────────────────────┴─────────────────────────────────────┘"
+
+echo ""
+echo -e "${BOLD}Step 3:${NC} Copy the private key below for ${GREEN}DEPLOY_SSH_KEY${NC}:"
+echo -e "  (include the BEGIN and END lines)"
+echo ""
+echo -e "${CYAN}────────────────────────────────────────────${NC}"
+echo "${DEPLOY_KEY}"
+echo -e "${CYAN}────────────────────────────────────────────${NC}"
+
+echo ""
+echo -e "${BOLD}Step 4:${NC} Add the workflow file to your repo."
+echo ""
+echo -e "  Create ${BOLD}.github/workflows/deploy.yml${NC} with this content:"
+echo ""
+echo -e "${CYAN}────────────────────────────────────────────${NC}"
+cat << EOF
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v2
+        with:
+          authkey: \${{ secrets.TS_AUTHKEY }}
+
+      - name: Deploy via SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "\${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no \\
+              -i ~/.ssh/deploy_key \\
+              \${{ secrets.DEPLOY_USER }}@\${{ secrets.DEPLOY_HOST }} \\
+              '${APP_DIR}/bin/deploy'
+EOF
+echo -e "${CYAN}────────────────────────────────────────────${NC}"
+
+echo ""
+echo -e "${BOLD}Step 5:${NC} Push a commit to main to trigger the first deploy."
+echo -e "  Or re-run at: ${CYAN}https://github.com/${GITHUB_USER}/${REPO_NAME}/actions${NC}"
+
+echo ""
+echo -e "${BOLD}Retrieve the deploy key later:${NC}"
+echo -e "  ${CYAN}pct exec ${CTID} -- cat /home/deploy/.ssh/id_ed25519${NC}"
+echo ""

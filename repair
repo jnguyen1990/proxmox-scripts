@@ -202,10 +202,41 @@ else
   create_deploy_script && check_fixed "Deploy script created" || check_fail "Deploy script"
 fi
 
-# ── 10. Systemd service ────────────────────────────────────────────────────
+# ── 10. File ownership ──────────────────────────────────────────────────────
+if pct exec "${CTID}" -- stat -c '%U' "${APP_DIR}" 2>/dev/null | grep -q "deploy"; then
+  check_ok "App directory owned by deploy"
+else
+  info "Fixing file ownership..."
+  pct exec "${CTID}" -- chown -R deploy:deploy "${APP_DIR}" 2>/dev/null
+  check_fixed "App directory ownership fixed"
+fi
+
+# ── 11. Systemd service ────────────────────────────────────────────────────
+_service_needs_fix=false
 if pct exec "${CTID}" -- systemctl is-enabled "${REPO_NAME}" 2>/dev/null | grep -q "enabled"; then
-  # Check if it's actually running
-  if pct exec "${CTID}" -- systemctl is-active "${REPO_NAME}" 2>/dev/null | grep -q "active"; then
+  # Check service content for known issues
+  local _svc_content
+  _svc_content=$(pct exec "${CTID}" -- cat "/etc/systemd/system/${REPO_NAME}.service" 2>/dev/null || true)
+
+  # Check SOLID_QUEUE_IN_PUMA should be false
+  if echo "${_svc_content}" | grep -q "SOLID_QUEUE_IN_PUMA=true"; then
+    info "Fixing SOLID_QUEUE_IN_PUMA=true -> false..."
+    pct exec "${CTID}" -- sed -i 's/SOLID_QUEUE_IN_PUMA=true/SOLID_QUEUE_IN_PUMA=false/' "/etc/systemd/system/${REPO_NAME}.service"
+    _service_needs_fix=true
+  fi
+
+  # Check RAILS_MASTER_KEY is set (not empty)
+  if [[ -n "${RAILS_MASTER_KEY:-}" ]] && echo "${_svc_content}" | grep -q "RAILS_MASTER_KEY=$"; then
+    info "Fixing missing RAILS_MASTER_KEY in service..."
+    pct exec "${CTID}" -- sed -i "s|RAILS_MASTER_KEY=|RAILS_MASTER_KEY=${RAILS_MASTER_KEY}|" "/etc/systemd/system/${REPO_NAME}.service"
+    _service_needs_fix=true
+  fi
+
+  if [[ "${_service_needs_fix}" == "true" ]]; then
+    pct exec "${CTID}" -- bash -c 'systemctl daemon-reload'
+    pct exec "${CTID}" -- systemctl restart "${REPO_NAME}" 2>/dev/null
+    check_fixed "Systemd service config repaired and restarted"
+  elif pct exec "${CTID}" -- systemctl is-active "${REPO_NAME}" 2>/dev/null | grep -q "active"; then
     check_ok "Systemd service running"
   else
     info "Service exists but not running, restarting..."
