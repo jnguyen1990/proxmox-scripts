@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# Proxmox LXC Deploy Repair
+# Checks an existing container and fixes anything missing from a partial deploy
+#
+# Usage (from Proxmox VE shell):
+#   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ repair
+#
+# Or from a cloned repo:
+#   ./repair
+# ============================================================================
+
+# No set -e — we want to continue checking even if a fix fails
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Source modules ──────────────────────────────────────────────────────────
+source "${SCRIPT_DIR}/lib/common.sh"
+source "${SCRIPT_DIR}/lib/config.sh"
+source "${SCRIPT_DIR}/lib/preflight.sh"
+source "${SCRIPT_DIR}/lib/lxc.sh"
+source "${SCRIPT_DIR}/lib/deps.sh"
+source "${SCRIPT_DIR}/lib/ruby.sh"
+source "${SCRIPT_DIR}/lib/app.sh"
+source "${SCRIPT_DIR}/lib/deploy-user.sh"
+source "${SCRIPT_DIR}/lib/systemd.sh"
+source "${SCRIPT_DIR}/lib/nginx.sh"
+source "${SCRIPT_DIR}/lib/cloudflare.sh"
+source "${SCRIPT_DIR}/lib/tailscale.sh"
+source "${SCRIPT_DIR}/lib/github-actions.sh"
+
+FIXED=0
+FAILED=0
+
+check_ok()    { success "$1"; }
+check_fixed() { echo -e "${YELLOW}[FIXED]${NC} $1"; FIXED=$((FIXED + 1)); }
+check_fail()  { echo -e "${RED}[FAIL]${NC} $1"; FAILED=$((FAILED + 1)); }
+
+# ── Select container ────────────────────────────────────────────────────────
+header "Proxmox Deploy Repair"
+
+# Load secrets
+SECRETS_FILE="/root/.proxmox-deploy-secrets"
+if [[ -f "${SECRETS_FILE}" ]]; then
+  info "Loading secrets from ${SECRETS_FILE}"
+  source "${SECRETS_FILE}"
+fi
+
+# Show running containers
+info "Running containers:"
+echo ""
+pct list | grep -v "^VMID" | while read -r line; do
+  echo "  ${line}"
+done
+echo ""
+
+read -rp "$(echo -e "${BOLD}Container ID to repair${NC}: ")" CTID
+if [[ -z "${CTID}" ]]; then error "CTID is required"; fi
+
+# Verify container exists and is running
+if ! pct status "${CTID}" 2>/dev/null | grep -q "running"; then
+  error "Container ${CTID} is not running. Start it with: pct start ${CTID}"
+fi
+
+# Get hostname as default repo name
+DEFAULT_REPO=$(pct exec "${CTID}" -- hostname 2>/dev/null || echo "")
+read -rp "$(echo -e "${BOLD}Repo name${NC} [${DEFAULT_REPO}]: ")" REPO_NAME
+REPO_NAME="${REPO_NAME:-${DEFAULT_REPO}}"
+if [[ -z "${REPO_NAME}" ]]; then error "Repo name is required"; fi
+
+# Set derived values
+GITHUB_USER="${GITHUB_USER:-jnguyen1990}"
+RUBY_VERSION="${RUBY_VERSION:-3.3.11}"
+APP_PORT="${APP_PORT:-3000}"
+APP_DIR="/opt/${REPO_NAME}"
+REPO_URL="git@github.com:${GITHUB_USER}/${REPO_NAME}.git"
+CF_SUBDOMAIN="${CF_SUBDOMAIN:-${REPO_NAME}}"
+
+# Check for per-app master key
+_app_key_var="RAILS_MASTER_KEY_$(echo "${REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')"
+if [[ -n "${!_app_key_var:-}" ]]; then
+  RAILS_MASTER_KEY="${!_app_key_var}"
+fi
+
+LXC_IP=$(pct exec "${CTID}" -- hostname -I 2>/dev/null | awk '{print $1}')
+
+header "Checking Container ${CTID} (${REPO_NAME})"
+
+# ── 1. System dependencies ──────────────────────────────────────────────────
+if pct exec "${CTID}" -- dpkg -l nginx 2>/dev/null | grep -q "^ii"; then
+  check_ok "System dependencies installed"
+else
+  info "Installing system dependencies..."
+  install_system_deps && check_fixed "System dependencies installed" || check_fail "System dependencies"
+fi
+
+# ── 2. Ruby ─────────────────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -d "/opt/rubies/ruby-${RUBY_VERSION}" 2>/dev/null; then
+  check_ok "Ruby ${RUBY_VERSION} installed"
+else
+  info "Installing Ruby ${RUBY_VERSION}..."
+  install_ruby && check_fixed "Ruby ${RUBY_VERSION} installed" || check_fail "Ruby installation"
+fi
+
+# ── 3. App cloned ───────────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -d "${APP_DIR}/.git" 2>/dev/null; then
+  check_ok "App cloned to ${APP_DIR}"
+else
+  info "Cloning app..."
+  pct exec "${CTID}" -- bash -c "git clone ${REPO_URL} ${APP_DIR} 2>&1" && check_fixed "App cloned" || check_fail "App clone"
+fi
+
+# ── 4. Gems installed ──────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -d "${APP_DIR}/vendor/bundle" 2>/dev/null; then
+  check_ok "Gems installed"
+else
+  info "Installing gems..."
+  pct exec "${CTID}" -- bash -c "
+    export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
+    export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
+    cd ${APP_DIR}
+    gem install bundler --no-document -q
+    bundle config set --local deployment true
+    bundle config set --local without 'development test'
+    bundle install --quiet
+  " && check_fixed "Gems installed" || check_fail "Gem installation"
+fi
+
+# ── 5. Master key ──────────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -f "${APP_DIR}/config/master.key" 2>/dev/null; then
+  check_ok "Master key present"
+else
+  if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
+    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+    check_fixed "Master key written"
+  else
+    read -rp "$(echo -e "${BOLD}Rails master key for ${REPO_NAME}${NC} (or Enter to skip): ")" RAILS_MASTER_KEY
+    if [[ -n "${RAILS_MASTER_KEY}" ]]; then
+      pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+      check_fixed "Master key written"
+    else
+      check_fail "Master key missing"
+    fi
+  fi
+fi
+
+# ── 6. Database ─────────────────────────────────────────────────────────────
+info "Running database migrations..."
+pct exec "${CTID}" -- bash -c "
+  export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
+  export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
+  cd ${APP_DIR}
+  RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -3
+" && check_ok "Database ready" || check_fail "Database migration"
+
+# ── 7. Deploy user ──────────────────────────────────────────────────────────
+if pct exec "${CTID}" -- id deploy 2>/dev/null | grep -q "deploy"; then
+  check_ok "Deploy user exists"
+else
+  info "Creating deploy user..."
+  create_deploy_user && check_fixed "Deploy user created" || check_fail "Deploy user"
+fi
+
+# ── 8. Deploy user GitHub SSH access ────────────────────────────────────────
+if pct exec "${CTID}" -- test -f /home/deploy/.ssh/config 2>/dev/null; then
+  check_ok "Deploy user GitHub SSH access"
+else
+  info "Setting up deploy user GitHub access..."
+  pct exec "${CTID}" -- bash -c '
+    if [[ -f /root/.ssh/id_ed25519 ]]; then
+      cp /root/.ssh/id_ed25519 /home/deploy/.ssh/id_ed25519_github
+      cp /root/.ssh/id_ed25519.pub /home/deploy/.ssh/id_ed25519_github.pub
+      chmod 600 /home/deploy/.ssh/id_ed25519_github
+      chown deploy:deploy /home/deploy/.ssh/id_ed25519_github*
+      cat > /home/deploy/.ssh/config << "SSHCFG"
+Host github.com
+  IdentityFile ~/.ssh/id_ed25519_github
+  StrictHostKeyChecking accept-new
+SSHCFG
+    elif [[ -f /root/.ssh/id_rsa ]]; then
+      cp /root/.ssh/id_rsa /home/deploy/.ssh/id_rsa_github
+      chmod 600 /home/deploy/.ssh/id_rsa_github
+      chown deploy:deploy /home/deploy/.ssh/id_rsa_github
+      cat > /home/deploy/.ssh/config << "SSHCFG"
+Host github.com
+  IdentityFile ~/.ssh/id_rsa_github
+  StrictHostKeyChecking accept-new
+SSHCFG
+    fi
+    chown deploy:deploy /home/deploy/.ssh/config 2>/dev/null
+    chmod 600 /home/deploy/.ssh/config 2>/dev/null
+  ' && check_fixed "Deploy user GitHub SSH access" || check_fail "Deploy user GitHub access"
+fi
+
+# ── 9. Deploy script ───────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -x "${APP_DIR}/bin/deploy" 2>/dev/null; then
+  check_ok "Deploy script exists"
+else
+  info "Creating deploy script..."
+  create_deploy_script && check_fixed "Deploy script created" || check_fail "Deploy script"
+fi
+
+# ── 10. Systemd service ────────────────────────────────────────────────────
+if pct exec "${CTID}" -- systemctl is-enabled "${REPO_NAME}" 2>/dev/null | grep -q "enabled"; then
+  # Check if it's actually running
+  if pct exec "${CTID}" -- systemctl is-active "${REPO_NAME}" 2>/dev/null | grep -q "active"; then
+    check_ok "Systemd service running"
+  else
+    info "Service exists but not running, restarting..."
+    pct exec "${CTID}" -- systemctl restart "${REPO_NAME}" 2>/dev/null
+    check_fixed "Systemd service restarted"
+  fi
+else
+  info "Creating systemd service..."
+  NGINX_LISTEN="${NGINX_LISTEN:-80}"
+  [[ -n "${CF_API_TOKEN:-}" ]] && NGINX_LISTEN="127.0.0.1:80"
+  setup_systemd && check_fixed "Systemd service created" || check_fail "Systemd service"
+fi
+
+# ── 11. Nginx ───────────────────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -f "/etc/nginx/sites-available/${REPO_NAME}" 2>/dev/null; then
+  check_ok "Nginx configured"
+else
+  info "Configuring nginx..."
+  NGINX_LISTEN="${NGINX_LISTEN:-80}"
+  [[ -n "${CF_API_TOKEN:-}" ]] && NGINX_LISTEN="127.0.0.1:80"
+  setup_nginx && check_fixed "Nginx configured" || check_fail "Nginx configuration"
+fi
+
+# ── 12. Cloudflare tunnel (conditional) ─────────────────────────────────────
+if [[ -n "${CF_API_TOKEN:-}" ]]; then
+  if pct exec "${CTID}" -- systemctl is-active cloudflared 2>/dev/null | grep -q "active"; then
+    check_ok "Cloudflare tunnel running"
+  else
+    info "Setting up Cloudflare tunnel..."
+    cf_setup && check_fixed "Cloudflare tunnel configured" || check_fail "Cloudflare tunnel"
+  fi
+fi
+
+# ── 13. Tailscale (conditional) ─────────────────────────────────────────────
+if [[ -n "${TS_AUTHKEY:-}" ]]; then
+  TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
+  if [[ -n "${TS_IP}" ]]; then
+    check_ok "Tailscale connected (${TS_IP})"
+  else
+    # Check if tailscale is installed
+    if pct exec "${CTID}" -- command -v tailscale &>/dev/null; then
+      info "Tailscale installed but not connected, joining..."
+      pct exec "${CTID}" -- tailscale up --authkey="${TS_AUTHKEY}" --hostname="${REPO_NAME}" 2>/dev/null
+      TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
+      if [[ -n "${TS_IP}" ]]; then
+        check_fixed "Tailscale connected (${TS_IP})"
+      else
+        check_fail "Tailscale connection"
+      fi
+    else
+      info "Installing and configuring Tailscale..."
+      # Check TUN device
+      if ! grep -q "lxc.mount.entry.*tun" "/etc/pve/lxc/${CTID}.conf" 2>/dev/null; then
+        info "Enabling TUN device (requires container restart)..."
+        echo "lxc.cgroup2.devices.allow: c 10:200 rwm" >> "/etc/pve/lxc/${CTID}.conf"
+        echo "lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file" >> "/etc/pve/lxc/${CTID}.conf"
+        pct reboot "${CTID}"
+        sleep 10
+      fi
+      ts_setup
+      TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
+      if [[ -n "${TS_IP}" ]]; then
+        check_fixed "Tailscale connected (${TS_IP})"
+      else
+        check_fail "Tailscale"
+      fi
+    fi
+  fi
+fi
+
+# ── 14. GitHub Actions (conditional) ────────────────────────────────────────
+if [[ -n "${GH_PAT:-}" ]]; then
+  info "Setting up GitHub Actions..."
+  gh_setup && check_ok "GitHub Actions configured" || check_fail "GitHub Actions"
+fi
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+header "Repair Summary"
+echo -e "${GREEN}${BOLD}Container:${NC}   ${CTID} (${REPO_NAME})"
+echo -e "${GREEN}${BOLD}LXC IP:${NC}      ${LXC_IP}"
+if [[ -n "${TS_IP:-}" ]]; then
+  echo -e "${GREEN}${BOLD}Tailscale:${NC}   ${TS_IP}"
+fi
+if [[ -n "${CF_API_TOKEN:-}" ]]; then
+  echo -e "${GREEN}${BOLD}URL:${NC}         https://${CF_SUBDOMAIN}.${CF_DOMAIN:-}"
+fi
+
+echo ""
+if [[ ${FAILED} -gt 0 ]]; then
+  echo -e "${RED}${BOLD}${FAILED} check(s) failed.${NC} Review the output above."
+elif [[ ${FIXED} -gt 0 ]]; then
+  echo -e "${GREEN}${BOLD}All issues fixed! (${FIXED} repair(s) made)${NC}"
+else
+  echo -e "${GREEN}${BOLD}Everything looks good! No repairs needed.${NC}"
+fi
