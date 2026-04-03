@@ -215,7 +215,6 @@ fi
 _service_needs_fix=false
 if pct exec "${CTID}" -- systemctl is-enabled "${REPO_NAME}" 2>/dev/null | grep -q "enabled"; then
   # Check service content for known issues
-  local _svc_content
   _svc_content=$(pct exec "${CTID}" -- cat "/etc/systemd/system/${REPO_NAME}.service" 2>/dev/null || true)
 
   # Check SOLID_QUEUE_IN_PUMA should be false
