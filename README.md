@@ -22,6 +22,14 @@ bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scr
 
 Checks an existing container for missing components and fixes them. Useful when `deploy` fails partway through. Checks: system deps, Ruby, app clone, gems, master key, database, deploy user, GitHub SSH access, deploy script, systemd service config, nginx, Cloudflare tunnel, Tailscale, and file ownership.
 
+### Tear down containers
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ teardown
+```
+
+Interactive removal of LXC containers and all connected services. Lists your containers, prompts for IDs, then deletes the Cloudflare tunnel + DNS records, logs out Tailscale, and destroys the container.
+
 ### Get GitHub Actions setup info
 
 ```bash
@@ -91,6 +99,7 @@ Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH acce
 ```
 deploy                 # Main orchestrator - full deploy from scratch
 repair                 # Check & fix partial deploys
+teardown               # Interactive container removal (CF + TS + LXC)
 setup-github           # Print GitHub Actions setup info for a container
 bootstrap.sh           # One-liner bootstrap (clones repo + runs command)
 generate               # Builds single-file paste-able scripts
@@ -143,7 +152,12 @@ Redeploy:    ssh deploy@100.118.249.29 '/opt/budgeter/bin/deploy'
 pct exec <ctid> -- journalctl -u <app-name> -f    # View logs
 pct exec <ctid> -- systemctl restart <app-name>    # Restart app
 pct enter <ctid>                                    # Shell into container
-pct stop <ctid> && pct destroy <ctid>              # Remove container
+```
+
+To remove containers cleanly (including Cloudflare tunnels, DNS records, and Tailscale nodes):
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ teardown
 ```
 
 ## Deploying Multiple Apps
