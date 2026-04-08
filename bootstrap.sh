@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Lightweight bootstrap - downloads the repo and runs deploy or repair
+# Lightweight bootstrap - downloads the repo and runs deploy, repair, or teardown
 #
-# Deploy:  bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
-# Repair:  bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ repair
+# Deploy:   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)"
+# Repair:   bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ repair
+# Teardown: bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scripts/main/bootstrap.sh)" _ teardown
 
 set -euo pipefail
 
