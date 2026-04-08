@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================================
+# Teardown: Remove LXC containers with their Cloudflare tunnels & Tailscale
+# Interactive — prompts for container IDs, discovers app name + linked services
+# Usage: bash teardown
+# ============================================================================
+
+BOLD='\033[1m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+info()    { echo -e "${CYAN}[INFO]${NC} $*"; }
+success() { echo -e "${GREEN}[OK]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
+err()     { echo -e "${RED}[ERROR]${NC} $*"; }
+
+SECRETS_FILE="/root/.proxmox-deploy-secrets"
+CF_API_BODY=""
+
+# ── Cloudflare API helper ──
+cf_api() {
+  local method="$1" endpoint="$2" data="${3:-}"
+  local args=(-s -w "\n%{http_code}" -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: application/json")
+  [[ -n "${data}" ]] && args+=(-X "${method}" -d "${data}") || args+=(-X "${method}")
+
+  local response http_code
+  response=$(curl "${args[@]}" "https://api.cloudflare.com/client/v4${endpoint}")
+  http_code=$(echo "${response}" | tail -1)
+  CF_API_BODY=$(echo "${response}" | sed '$d')
+
+  [[ "${http_code}" =~ ^2[0-9]{2}$ ]] && return 0 || return 1
+}
+
+# ── Get app name (hostname) from container ──
+get_app_name() {
+  local ctid="$1"
+  pct list 2>/dev/null | awk -v id="${ctid}" '$1 == id {print $3; exit}'
+}
+
+# ── Detect Cloudflare tunnel name from inside container ──
+detect_cloudflare_tunnel() {
+  local ctid="$1"
+  # Read the tunnel name from cloudflared config inside the container
+  pct exec "${ctid}" -- bash -c 'cat /etc/cloudflared/config.yml 2>/dev/null' 2>/dev/null | \
+    grep -o 'hostname: [^ ]*' | head -1 | sed 's/hostname: //' || true
+}
+
+# ── Detect Tailscale status from inside container ──
+detect_tailscale() {
+  local ctid="$1"
+  pct exec "${ctid}" -- tailscale ip -4 2>/dev/null || true
+}
+
+# ── Remove Cloudflare tunnel + DNS record ──
+remove_cloudflare() {
+  local app_name="$1"
+  local tunnel_name="${app_name}-tunnel"
+
+  if [[ -z "${CF_API_TOKEN:-}" ]]; then
+    warn "No CF_API_TOKEN — skipping Cloudflare cleanup for ${app_name}"
+    return 0
+  fi
+
+  info "Looking for Cloudflare tunnel: ${tunnel_name}"
+
+  # Find and delete DNS CNAME record
+  local subdomain="${app_name}"
+  if cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=${subdomain}.${CF_DOMAIN}&type=CNAME"; then
+    local record_id
+    record_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    if [[ -n "${record_id}" ]]; then
+      cf_api DELETE "/zones/${CF_ZONE_ID}/dns_records/${record_id}" && \
+        success "DNS record deleted: ${subdomain}.${CF_DOMAIN}" || \
+        warn "Failed to delete DNS record for ${subdomain}.${CF_DOMAIN}"
+    else
+      info "No DNS record found for ${subdomain}.${CF_DOMAIN}"
+    fi
+  fi
+
+  # Also check for ssh- prefixed DNS record (SSH tunnel)
+  if cf_api GET "/zones/${CF_ZONE_ID}/dns_records?name=ssh-${subdomain}.${CF_DOMAIN}&type=CNAME"; then
+    local ssh_record_id
+    ssh_record_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    if [[ -n "${ssh_record_id}" ]]; then
+      cf_api DELETE "/zones/${CF_ZONE_ID}/dns_records/${ssh_record_id}" && \
+        success "DNS record deleted: ssh-${subdomain}.${CF_DOMAIN}" || \
+        warn "Failed to delete SSH DNS record"
+    fi
+  fi
+
+  # Find and delete the tunnel
+  if cf_api GET "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel?name=${tunnel_name}&is_deleted=false"; then
+    local tunnel_id
+    tunnel_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    if [[ -n "${tunnel_id}" ]]; then
+      cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/connections" 2>/dev/null || true
+      cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}" && \
+        success "Tunnel deleted: ${tunnel_name} (${tunnel_id})" || \
+        warn "Failed to delete tunnel ${tunnel_name}"
+    else
+      info "No tunnel found: ${tunnel_name}"
+    fi
+  fi
+}
+
+# ── Remove Tailscale node ──
+remove_tailscale() {
+  local app_name="$1" ctid="$2"
+
+  if pct status "${ctid}" 2>/dev/null | grep -q running; then
+    info "Logging out Tailscale in container ${ctid}..."
+    pct exec "${ctid}" -- tailscale logout 2>/dev/null || true
+    success "Tailscale logged out for ${app_name}"
+  else
+    warn "Container ${ctid} not running — remove stale Tailscale node manually"
+    warn "  https://login.tailscale.com/admin/machines"
+  fi
+}
+
+# ── Stop and destroy container ──
+destroy_container() {
+  local app_name="$1" ctid="$2"
+
+  info "Stopping container ${ctid} (${app_name})..."
+  pct stop "${ctid}" 2>/dev/null || true
+  sleep 2
+
+  info "Destroying container ${ctid} (${app_name})..."
+  pct destroy "${ctid}" --purge 2>/dev/null && \
+    success "Container ${ctid} (${app_name}) destroyed" || \
+    err "Failed to destroy container ${ctid}"
+}
+
+# ── Main ──
+
+# Load secrets for Cloudflare API
+if [[ -f "${SECRETS_FILE}" ]]; then
+  source "${SECRETS_FILE}"
+fi
+
+echo ""
+echo -e "${BOLD}╔══════════════════════════════════╗${NC}"
+echo -e "${BOLD}║     Container Teardown Tool       ║${NC}"
+echo -e "${BOLD}╚══════════════════════════════════╝${NC}"
+echo ""
+
+# Show current containers
+echo -e "${BOLD}Current containers:${NC}"
+echo ""
+pct list 2>/dev/null | head -1
+pct list 2>/dev/null | tail -n +2 | while read -r line; do
+  ctid=$(echo "${line}" | awk '{print $1}')
+  status=$(echo "${line}" | awk '{print $2}')
+  name=$(echo "${line}" | awk '{print $3}')
+  if [[ "${status}" == "running" ]]; then
+    echo -e "  ${GREEN}${ctid}${NC}  ${status}  ${BOLD}${name}${NC}"
+  else
+    echo -e "  ${YELLOW}${ctid}${NC}  ${status}  ${name}"
+  fi
+done
+echo ""
+
+# Prompt for container IDs
+read -rp "$(echo -e "${BOLD}Enter container ID(s) to tear down${NC} (space-separated): ")" -a CTIDS
+
+if [[ ${#CTIDS[@]} -eq 0 ]]; then
+  echo "No containers specified. Exiting."
+  exit 0
+fi
+
+# Resolve each CTID to its app name and detect services
+declare -A TARGETS
+echo ""
+for ctid in "${CTIDS[@]}"; do
+  app_name=$(get_app_name "${ctid}")
+  if [[ -z "${app_name}" ]]; then
+    warn "Container ${ctid} not found — skipping"
+    continue
+  fi
+
+  # Detect what's connected
+  local_services=""
+
+  if pct status "${ctid}" 2>/dev/null | grep -q running; then
+    cf_host=$(detect_cloudflare_tunnel "${ctid}")
+    ts_ip=$(detect_tailscale "${ctid}")
+    [[ -n "${cf_host}" ]] && local_services="${local_services} CF:${cf_host}"
+    [[ -n "${ts_ip}" ]] && local_services="${local_services} TS:${ts_ip}"
+  fi
+
+  TARGETS["${ctid}"]="${app_name}"
+  echo -e "  ${BOLD}${ctid}${NC} → ${app_name}${local_services:+ (${local_services## })}"
+done
+
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  echo "No valid containers found. Exiting."
+  exit 0
+fi
+
+echo ""
+echo "This will:"
+echo "  1. Delete Cloudflare tunnels + DNS records"
+echo "  2. Log out Tailscale nodes"
+echo "  3. Stop and destroy the LXC containers"
+echo ""
+read -rp "$(echo -e "${RED}${BOLD}Are you sure? This cannot be undone. [y/N]${NC} ")" confirm
+[[ "${confirm,,}" == "y" ]] || { echo "Aborted."; exit 0; }
+
+echo ""
+
+for ctid in "${!TARGETS[@]}"; do
+  app_name="${TARGETS[${ctid}]}"
+  echo -e "${BOLD}━━━ Tearing down: ${app_name} (CTID ${ctid}) ━━━${NC}"
+
+  remove_cloudflare "${app_name}"
+  remove_tailscale "${app_name}" "${ctid}"
+  destroy_container "${app_name}" "${ctid}"
+
+  echo ""
+done
+
+echo -e "${GREEN}${BOLD}Teardown complete!${NC}"
+echo ""
+echo "Cleanup reminders:"
+echo "  • Remove stale Tailscale nodes: https://login.tailscale.com/admin/machines"
+echo "  • Verify DNS records removed: https://dash.cloudflare.com → ${CF_DOMAIN:-your domain} → DNS"
