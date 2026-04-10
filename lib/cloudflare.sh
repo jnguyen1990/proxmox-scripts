@@ -138,108 +138,6 @@ cf_enable_service() {
   success "cloudflared service running"
 }
 
-cf_create_web_access_app() {
-  # Protect the web app behind Cloudflare Access (self_hosted) with an email-OTP allow-list.
-  # Opt-in via CF_ACCESS_ALLOWED_EMAILS (comma-separated). Unset = no protection, deploy proceeds.
-  # Non-fatal: on any CF API failure this warns and returns 0 so deploys never break.
-  # NOTE: this is NOT the same as the removed cf_create_access_app (type:ssh) which protected
-  # cloudflared SSH deploys — that role is now Tailscale's. This creates a type:self_hosted
-  # app in front of the browser-facing URL.
-  if [[ -z "${CF_ACCESS_ALLOWED_EMAILS:-}" ]]; then
-    return 0
-  fi
-
-  info "Setting up Cloudflare Access (email-OTP) for web app..."
-
-  # ── Normalize the allow-list ──
-  local -a emails=()
-  local -a _raw_entries=()
-  local _raw_entry
-  local _old_ifs="${IFS}"
-  IFS=','
-  # shellcheck disable=SC2162
-  read -ra _raw_entries <<< "${CF_ACCESS_ALLOWED_EMAILS}"
-  IFS="${_old_ifs}"
-  for _raw_entry in "${_raw_entries[@]}"; do
-    # Trim whitespace
-    _raw_entry="${_raw_entry#"${_raw_entry%%[![:space:]]*}"}"
-    _raw_entry="${_raw_entry%"${_raw_entry##*[![:space:]]}"}"
-    [[ -z "${_raw_entry}" ]] && continue
-    # Sanity-check: only safe chars for JSON injection
-    if [[ ! "${_raw_entry}" =~ ^[a-zA-Z0-9._+@-]+$ ]]; then
-      warn "Skipping unsafe email entry: '${_raw_entry}'"
-      continue
-    fi
-    emails+=("${_raw_entry}")
-  done
-
-  if [[ ${#emails[@]} -eq 0 ]]; then
-    warn "CF_ACCESS_ALLOWED_EMAILS is empty after parsing; skipping Access setup"
-    return 0
-  fi
-
-  # ── Build policy include JSON ──
-  local include_json="["
-  local _first=1
-  local _email
-  for _email in "${emails[@]}"; do
-    if [[ ${_first} -eq 1 ]]; then
-      _first=0
-    else
-      include_json+=","
-    fi
-    include_json+="{\"email\":{\"email\":\"${_email}\"}}"
-  done
-  include_json+="]"
-
-  local subdomain="${CF_SUBDOMAIN:-${REPO_NAME}}"
-  local fqdn="${subdomain}.${CF_DOMAIN}"
-
-  # ── Look up existing Access app by domain (TODO: paginate if >200 apps ever) ──
-  local app_id=""
-  if cf_api GET "/accounts/${CF_ACCOUNT_ID}/access/apps?per_page=200"; then
-    app_id=$(echo "${CF_API_BODY}" \
-      | grep -o "{[^{}]*\"domain\" *: *\"${fqdn}\"[^{}]*}" \
-      | grep -o '"id" *: *"[^"]*"' \
-      | head -1 | cut -d'"' -f4 || true)
-  fi
-
-  # ── Delete-then-recreate for clean policy state ──
-  if [[ -n "${app_id}" ]]; then
-    warn "Access app for ${fqdn} exists (${app_id}), deleting and recreating"
-    cf_api DELETE "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}" || true
-    app_id=""
-  fi
-
-  local app_payload
-  app_payload="{\"name\":\"${REPO_NAME}\",\"domain\":\"${fqdn}\",\"type\":\"self_hosted\",\"session_duration\":\"24h\",\"auto_redirect_to_identity\":false,\"app_launcher_visible\":false,\"allowed_idps\":[]}"
-
-  if ! cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps" "${app_payload}"; then
-    warn "Could not create Cloudflare Access app for ${fqdn}."
-    warn "If you saw HTTP 403, add 'Account > Access: Apps and Policies > Edit' to CF_API_TOKEN."
-    return 0
-  fi
-
-  app_id=$(echo "${CF_API_BODY}" | grep -o '"id" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-  if [[ -z "${app_id}" ]]; then
-    warn "Created Access app but could not extract id from response"
-    return 0
-  fi
-  success "Access app created: ${fqdn}"
-
-  # ── Attach allow policy ──
-  local policy_payload
-  policy_payload="{\"name\":\"Allow listed emails\",\"decision\":\"allow\",\"precedence\":1,\"include\":${include_json}}"
-
-  if ! cf_api POST "/accounts/${CF_ACCOUNT_ID}/access/apps/${app_id}/policies" "${policy_payload}"; then
-    warn "Access app ${fqdn} exists WITHOUT a policy — it is currently blocking everyone."
-    warn "Re-run the deploy, delete the app in the CF dashboard, or add a policy manually."
-    return 0
-  fi
-
-  success "Access policy attached (${#emails[@]} allowed email(s))"
-}
-
 cf_setup() {
   if [[ -z "${CF_API_TOKEN:-}" ]]; then
     return 0
@@ -255,7 +153,6 @@ cf_setup() {
   cf_write_credentials
   cf_write_config
   cf_enable_service
-  cf_create_web_access_app
 
   success "Cloudflare tunnel active: https://${CF_SUBDOMAIN}.${CF_DOMAIN}"
 }

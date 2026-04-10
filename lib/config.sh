@@ -16,18 +16,16 @@ _maybe_save_secrets() {
   local has_new_secrets=false
 
   # Check if there are secrets that aren't already saved
-  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" || -n "${TS_AUTHKEY:-}" || -n "${CF_ACCESS_ALLOWED_EMAILS:-}" ]]; then
+  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" || -n "${TS_AUTHKEY:-}" ]]; then
     if [[ -f "${SECRETS_FILE}" ]]; then
       # shellcheck source=/dev/null
-      local _existing_cf _existing_gh _existing_cf_access
+      local _existing_cf _existing_gh
       _existing_cf=$(grep -c "CF_API_TOKEN" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       _existing_gh=$(grep -c "GH_PAT" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       _existing_ts=$(grep -c "TS_AUTHKEY" "${SECRETS_FILE}" 2>/dev/null || echo 0)
-      _existing_cf_access=$(grep -c "CF_ACCESS_ALLOWED_EMAILS" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       [[ -n "${CF_API_TOKEN:-}" && "${_existing_cf}" == "0" ]] && has_new_secrets=true
       [[ -n "${GH_PAT:-}" && "${_existing_gh}" == "0" ]] && has_new_secrets=true
       [[ -n "${TS_AUTHKEY:-}" && "${_existing_ts}" == "0" ]] && has_new_secrets=true
-      [[ -n "${CF_ACCESS_ALLOWED_EMAILS:-}" && "${_existing_cf_access}" == "0" ]] && has_new_secrets=true
     else
       has_new_secrets=true
     fi
@@ -58,7 +56,6 @@ CF_API_TOKEN="${CF_API_TOKEN}"
 CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-}"
 CF_ZONE_ID="${CF_ZONE_ID:-}"
 CF_DOMAIN="${CF_DOMAIN:-}"
-CF_ACCESS_ALLOWED_EMAILS="${CF_ACCESS_ALLOWED_EMAILS:-}"
 EOF
   fi
 
@@ -193,24 +190,6 @@ load_config() {
 
       read -rp "$(echo -e "${BOLD}Subdomain${NC} [${REPO_NAME}]: ")" _sub
       CF_SUBDOMAIN="${_sub:-${REPO_NAME}}"
-
-      # ── Cloudflare Access (email-OTP allow-list) ──
-      echo ""
-      if [[ -n "${CF_ACCESS_ALLOWED_EMAILS:-}" ]]; then
-        info "Cloudflare Access allow-list loaded: ${CF_ACCESS_ALLOWED_EMAILS}"
-        read -rp "$(echo -e "${BOLD}Protect ${CF_SUBDOMAIN}.${CF_DOMAIN} with Cloudflare Access email-OTP?${NC} [Y/n]: ")" _acc
-        _acc="${_acc:-y}"
-      else
-        read -rp "$(echo -e "${BOLD}Protect ${CF_SUBDOMAIN}.${CF_DOMAIN} with Cloudflare Access email-OTP?${NC} [y/N]: ")" _acc
-      fi
-      if [[ "${_acc,,}" == "y" ]]; then
-        if [[ -z "${CF_ACCESS_ALLOWED_EMAILS:-}" ]]; then
-          info "Comma-separated emails allowed through Access (e.g. me@example.com,you@example.com)"
-          _read_value "Allowed emails"; CF_ACCESS_ALLOWED_EMAILS="${_read_result}"
-        fi
-      else
-        unset CF_ACCESS_ALLOWED_EMAILS
-      fi
     fi
 
     # ── GitHub Actions ──
@@ -264,7 +243,6 @@ validate_config() {
   info "Specs: ${LXC_CORES} core(s), ${LXC_RAM}MB RAM, ${LXC_DISK}GB disk"
   info "Storage: ${STORAGE}"
   [[ -n "${CF_API_TOKEN:-}" ]] && info "Cloudflare: ${CF_SUBDOMAIN:-${REPO_NAME}}.${CF_DOMAIN}"
-  [[ -n "${CF_ACCESS_ALLOWED_EMAILS:-}" ]] && info "Cloudflare Access: enabled (${CF_ACCESS_ALLOWED_EMAILS})"
   [[ -n "${TS_AUTHKEY:-}" ]] && info "Tailscale: enabled"
   [[ -n "${GH_PAT:-}" ]] && info "GitHub Actions: enabled"
   echo ""
