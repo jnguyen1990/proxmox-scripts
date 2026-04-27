@@ -136,6 +136,23 @@ load_config() {
   APP_DIR="/opt/${REPO_NAME}"
   REPO_URL="git@github.com:${GITHUB_USER}/${REPO_NAME}.git"
 
+  # ── Inter-App Secret (shared, runs every invocation) ──
+  # Resolved unconditionally so `repair` on a pre-existing LXC still
+  # populates the value when the saved secrets file predates this var.
+  if [[ -n "${INTER_APP_SECRET:-}" ]]; then
+    info "Inter-app secret: (saved) ****${INTER_APP_SECRET: -4}"
+  else
+    echo ""
+    info "Shared bearer token for app-to-app HTTP calls (personal_app_client gem)."
+    info "Same value across all apps. Press Enter to auto-generate."
+    read -rp "$(echo -e "${BOLD}Inter-app secret${NC} (or Enter to generate): ")" INTER_APP_SECRET
+    if [[ -z "${INTER_APP_SECRET}" ]]; then
+      INTER_APP_SECRET=$(openssl rand -hex 32)
+      info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
+    fi
+    _maybe_save_secrets
+  fi
+
   # Interactive prompts for specs if not from config file
   if [[ ! -f "${config_file}" ]]; then
     read -rp "$(echo -e "${BOLD}App port${NC} [${APP_PORT}]: ")" _port
@@ -165,20 +182,6 @@ load_config() {
       read -rp "$(echo -e "${BOLD}Rails master key for ${REPO_NAME}${NC} (or Enter to skip): ")" RAILS_MASTER_KEY
     else
       info "Rails master key for ${REPO_NAME}: (saved) ****${RAILS_MASTER_KEY: -4}"
-    fi
-
-    # ── Inter-App Secret (shared) ──
-    if [[ -n "${INTER_APP_SECRET:-}" ]]; then
-      info "Inter-app secret: (saved) ****${INTER_APP_SECRET: -4}"
-    else
-      echo ""
-      info "Shared bearer token for app-to-app HTTP calls (personal_app_client gem)."
-      info "Same value across all apps. Press Enter to auto-generate."
-      read -rp "$(echo -e "${BOLD}Inter-app secret${NC} (or Enter to generate): ")" INTER_APP_SECRET
-      if [[ -z "${INTER_APP_SECRET}" ]]; then
-        INTER_APP_SECRET=$(openssl rand -hex 32)
-        info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
-      fi
     fi
 
     # ── Cloudflare Tunnel ──
