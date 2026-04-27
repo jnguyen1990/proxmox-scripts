@@ -21,10 +21,12 @@ ts_setup() {
       pct exec "${CTID}" -- bash -c 'set -e; curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1'
   fi
 
-  # Join tailnet using authkey
+  # Join tailnet using authkey. accept-dns=true enables MagicDNS so apps
+  # can reach each other via <hostname>.<tailnet>.ts.net (used by the
+  # personal_app_client gem for inter-app HTTP).
   if [[ -n "${TS_AUTHKEY:-}" ]]; then
     info "Joining tailnet as '${REPO_NAME}'..."
-    pct exec "${CTID}" -- tailscale up --authkey="${TS_AUTHKEY}" --hostname="${REPO_NAME}" --accept-dns=false
+    pct exec "${CTID}" -- tailscale up --authkey="${TS_AUTHKEY}" --hostname="${REPO_NAME}" --accept-dns=true
   else
     info "Joining tailnet as '${REPO_NAME}'..."
     warn "No TS_AUTHKEY set. Tailscale installed but you need to join manually:"

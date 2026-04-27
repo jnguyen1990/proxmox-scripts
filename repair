@@ -288,6 +288,14 @@ if [[ -n "${TS_AUTHKEY:-}" || -n "${TS_OAUTH_CLIENT_ID:-}" ]]; then
   TS_IP=$(pct exec "${CTID}" -- tailscale ip -4 2>/dev/null || true)
   if [[ -n "${TS_IP}" ]]; then
     check_ok "Tailscale connected (${TS_IP})"
+    # Ensure MagicDNS is on (older deploys ran with --accept-dns=false,
+    # which breaks <hostname>.<tailnet>.ts.net resolution and therefore
+    # the personal_app_client gem's inter-app HTTP).
+    if ! pct exec "${CTID}" -- bash -c "tailscale status --json 2>/dev/null | grep -q '\"AcceptDNS\":true'" 2>/dev/null; then
+      info "Enabling MagicDNS (--accept-dns=true)..."
+      pct exec "${CTID}" -- tailscale set --accept-dns=true 2>/dev/null
+      check_fixed "Tailscale MagicDNS enabled"
+    fi
   else
     # Check if tailscale is installed
     if pct exec "${CTID}" -- command -v tailscale &>/dev/null; then
