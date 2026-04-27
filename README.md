@@ -88,6 +88,7 @@ All settings are prompted interactively. For repeated deploys, use `deploy.conf`
 | `LXC_CORES` | `1` | Container CPU cores |
 | `STORAGE` | `local-lvm` | Proxmox storage pool |
 | `RAILS_MASTER_KEY` | *(prompted)* | From `config/master.key` (saved per-app) |
+| `INTER_APP_SECRET` | *(auto-generated)* | Shared bearer token for app-to-app HTTP via [personal_app_client](https://github.com/jnguyen1990/personal-app-client). One value, reused across all apps. |
 
 ### Cloudflare Tunnel (optional)
 

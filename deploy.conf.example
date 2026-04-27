@@ -38,6 +38,16 @@ REPO_NAME=""
 # Needed to decrypt credentials in production.
 # RAILS_MASTER_KEY=""
 
+# ── Inter-App Secret (shared across apps) ──────────────────────────────────
+# Bearer token used by the personal_app_client gem to authenticate app-to-app
+# HTTP calls (e.g. base ↔ fitness goal/session sync). All apps must share
+# the same value. Generate once with:
+#   openssl rand -hex 32
+# Saved to ~/.proxmox-deploy-secrets after first deploy and reused for every
+# subsequent app on the same Proxmox host. Auto-generated if you skip the
+# prompt.
+# INTER_APP_SECRET=""
+
 # ── Cloudflare Tunnel (optional) ───────────────────────────────────────────
 # Leave empty to skip Cloudflare tunnel setup.
 # When configured, traffic routes through Cloudflare's network instead of

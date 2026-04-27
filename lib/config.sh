@@ -16,16 +16,18 @@ _maybe_save_secrets() {
   local has_new_secrets=false
 
   # Check if there are secrets that aren't already saved
-  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" || -n "${TS_AUTHKEY:-}" ]]; then
+  if [[ -n "${CF_API_TOKEN:-}" || -n "${GH_PAT:-}" || -n "${TS_AUTHKEY:-}" || -n "${INTER_APP_SECRET:-}" ]]; then
     if [[ -f "${SECRETS_FILE}" ]]; then
       # shellcheck source=/dev/null
-      local _existing_cf _existing_gh
+      local _existing_cf _existing_gh _existing_ts _existing_ias
       _existing_cf=$(grep -c "CF_API_TOKEN" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       _existing_gh=$(grep -c "GH_PAT" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       _existing_ts=$(grep -c "TS_AUTHKEY" "${SECRETS_FILE}" 2>/dev/null || echo 0)
+      _existing_ias=$(grep -c "INTER_APP_SECRET" "${SECRETS_FILE}" 2>/dev/null || echo 0)
       [[ -n "${CF_API_TOKEN:-}" && "${_existing_cf}" == "0" ]] && has_new_secrets=true
       [[ -n "${GH_PAT:-}" && "${_existing_gh}" == "0" ]] && has_new_secrets=true
       [[ -n "${TS_AUTHKEY:-}" && "${_existing_ts}" == "0" ]] && has_new_secrets=true
+      [[ -n "${INTER_APP_SECRET:-}" && "${_existing_ias}" == "0" ]] && has_new_secrets=true
     else
       has_new_secrets=true
     fi
@@ -72,6 +74,14 @@ EOF
 
 # Tailscale
 TS_AUTHKEY="${TS_AUTHKEY}"
+EOF
+  fi
+
+  if [[ -n "${INTER_APP_SECRET:-}" ]]; then
+    cat >> "${SECRETS_FILE}" << EOF
+
+# Inter-app shared bearer token (personal_app_client gem)
+INTER_APP_SECRET="${INTER_APP_SECRET}"
 EOF
   fi
 
@@ -155,6 +165,20 @@ load_config() {
       read -rp "$(echo -e "${BOLD}Rails master key for ${REPO_NAME}${NC} (or Enter to skip): ")" RAILS_MASTER_KEY
     else
       info "Rails master key for ${REPO_NAME}: (saved) ****${RAILS_MASTER_KEY: -4}"
+    fi
+
+    # ── Inter-App Secret (shared) ──
+    if [[ -n "${INTER_APP_SECRET:-}" ]]; then
+      info "Inter-app secret: (saved) ****${INTER_APP_SECRET: -4}"
+    else
+      echo ""
+      info "Shared bearer token for app-to-app HTTP calls (personal_app_client gem)."
+      info "Same value across all apps. Press Enter to auto-generate."
+      read -rp "$(echo -e "${BOLD}Inter-app secret${NC} (or Enter to generate): ")" INTER_APP_SECRET
+      if [[ -z "${INTER_APP_SECRET}" ]]; then
+        INTER_APP_SECRET=$(openssl rand -hex 32)
+        info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
+      fi
     fi
 
     # ── Cloudflare Tunnel ──

@@ -231,6 +231,18 @@ if pct exec "${CTID}" -- systemctl is-enabled "${REPO_NAME}" 2>/dev/null | grep 
     _service_needs_fix=true
   fi
 
+  # Add INTER_APP_SECRET line if absent (older units predate it). Insert it
+  # after the RAILS_MASTER_KEY line so the file stays readable.
+  if [[ -n "${INTER_APP_SECRET:-}" ]] && ! echo "${_svc_content}" | grep -q "INTER_APP_SECRET="; then
+    info "Adding missing INTER_APP_SECRET to service..."
+    pct exec "${CTID}" -- sed -i "/^Environment=RAILS_MASTER_KEY=/a Environment=INTER_APP_SECRET=${INTER_APP_SECRET}" "/etc/systemd/system/${REPO_NAME}.service"
+    _service_needs_fix=true
+  elif [[ -n "${INTER_APP_SECRET:-}" ]] && echo "${_svc_content}" | grep -q "INTER_APP_SECRET=$"; then
+    info "Fixing missing INTER_APP_SECRET value in service..."
+    pct exec "${CTID}" -- sed -i "s|INTER_APP_SECRET=|INTER_APP_SECRET=${INTER_APP_SECRET}|" "/etc/systemd/system/${REPO_NAME}.service"
+    _service_needs_fix=true
+  fi
+
   if [[ "${_service_needs_fix}" == "true" ]]; then
     pct exec "${CTID}" -- bash -c 'systemctl daemon-reload'
     pct exec "${CTID}" -- systemctl restart "${REPO_NAME}" 2>/dev/null
