@@ -48,6 +48,8 @@ if [[ -f "${SECRETS_FILE}" ]]; then
   source "${SECRETS_FILE}"
 fi
 
+ensure_inter_app_secret
+
 # Show running containers
 info "Running containers:"
 echo ""

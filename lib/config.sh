@@ -97,6 +97,26 @@ EOF
   chmod 600 "${SECRETS_FILE}"
 }
 
+# Resolve INTER_APP_SECRET via SECRETS_FILE → prompt → openssl-generate.
+# Idempotent: a saved value short-circuits with a "(saved)" line. Called
+# by both load_config (deploy) and repair so the secret gets populated
+# regardless of which entrypoint runs.
+ensure_inter_app_secret() {
+  if [[ -n "${INTER_APP_SECRET:-}" ]]; then
+    info "Inter-app secret: (saved) ****${INTER_APP_SECRET: -4}"
+    return 0
+  fi
+  echo ""
+  info "Shared bearer token for app-to-app HTTP calls (personal_app_client gem)."
+  info "Same value across all apps. Press Enter to auto-generate."
+  read -rp "$(echo -e "${BOLD}Inter-app secret${NC} (or Enter to generate): ")" INTER_APP_SECRET
+  if [[ -z "${INTER_APP_SECRET}" ]]; then
+    INTER_APP_SECRET=$(openssl rand -hex 32)
+    info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
+  fi
+  _maybe_save_secrets
+}
+
 load_config() {
   local config_file="${SCRIPT_DIR}/deploy.conf"
 
@@ -136,22 +156,7 @@ load_config() {
   APP_DIR="/opt/${REPO_NAME}"
   REPO_URL="git@github.com:${GITHUB_USER}/${REPO_NAME}.git"
 
-  # ── Inter-App Secret (shared, runs every invocation) ──
-  # Resolved unconditionally so `repair` on a pre-existing LXC still
-  # populates the value when the saved secrets file predates this var.
-  if [[ -n "${INTER_APP_SECRET:-}" ]]; then
-    info "Inter-app secret: (saved) ****${INTER_APP_SECRET: -4}"
-  else
-    echo ""
-    info "Shared bearer token for app-to-app HTTP calls (personal_app_client gem)."
-    info "Same value across all apps. Press Enter to auto-generate."
-    read -rp "$(echo -e "${BOLD}Inter-app secret${NC} (or Enter to generate): ")" INTER_APP_SECRET
-    if [[ -z "${INTER_APP_SECRET}" ]]; then
-      INTER_APP_SECRET=$(openssl rand -hex 32)
-      info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
-    fi
-    _maybe_save_secrets
-  fi
+  ensure_inter_app_secret
 
   # Interactive prompts for specs if not from config file
   if [[ ! -f "${config_file}" ]]; then
