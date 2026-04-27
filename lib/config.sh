@@ -97,6 +97,21 @@ EOF
   chmod 600 "${SECRETS_FILE}"
 }
 
+# Idempotent upsert into SECRETS_FILE. No prompt — this is standard
+# infrastructure, not a per-deploy choice. Uses sed-replace if the
+# key already exists (preserves the rest of the file untouched, unlike
+# _write_secrets_file which rewrites and drops per-app RAILS_MASTER_KEY_*
+# rows).
+_persist_inter_app_secret() {
+  touch "${SECRETS_FILE}" && chmod 600 "${SECRETS_FILE}"
+  if grep -q "^INTER_APP_SECRET=" "${SECRETS_FILE}"; then
+    sed -i "s|^INTER_APP_SECRET=.*|INTER_APP_SECRET=\"${INTER_APP_SECRET}\"|" "${SECRETS_FILE}"
+  else
+    printf '\n# Inter-app shared bearer token (personal_app_client gem)\nINTER_APP_SECRET="%s"\n' "${INTER_APP_SECRET}" >> "${SECRETS_FILE}"
+  fi
+  success "Saved INTER_APP_SECRET to ${SECRETS_FILE}"
+}
+
 # Resolve INTER_APP_SECRET via SECRETS_FILE → prompt → openssl-generate.
 # Idempotent: a saved value short-circuits with a "(saved)" line. Called
 # by both load_config (deploy) and repair so the secret gets populated
@@ -114,7 +129,7 @@ ensure_inter_app_secret() {
     INTER_APP_SECRET=$(openssl rand -hex 32)
     info "Generated inter-app secret: ****${INTER_APP_SECRET: -4}"
   fi
-  _maybe_save_secrets
+  _persist_inter_app_secret
 }
 
 load_config() {
