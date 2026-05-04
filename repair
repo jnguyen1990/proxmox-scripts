@@ -219,13 +219,6 @@ if pct exec "${CTID}" -- systemctl is-enabled "${REPO_NAME}" 2>/dev/null | grep 
   # Check service content for known issues
   _svc_content=$(pct exec "${CTID}" -- cat "/etc/systemd/system/${REPO_NAME}.service" 2>/dev/null || true)
 
-  # Check SOLID_QUEUE_IN_PUMA should be false
-  if echo "${_svc_content}" | grep -q "SOLID_QUEUE_IN_PUMA=true"; then
-    info "Fixing SOLID_QUEUE_IN_PUMA=true -> false..."
-    pct exec "${CTID}" -- sed -i 's/SOLID_QUEUE_IN_PUMA=true/SOLID_QUEUE_IN_PUMA=false/' "/etc/systemd/system/${REPO_NAME}.service"
-    _service_needs_fix=true
-  fi
-
   # Check RAILS_MASTER_KEY is set (not empty)
   if [[ -n "${RAILS_MASTER_KEY:-}" ]] && echo "${_svc_content}" | grep -q "RAILS_MASTER_KEY=$"; then
     info "Fixing missing RAILS_MASTER_KEY in service..."

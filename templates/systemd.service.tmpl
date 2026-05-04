@@ -14,7 +14,7 @@ Environment=PORT={{APP_PORT}}
 Environment=RAILS_MASTER_KEY={{RAILS_MASTER_KEY}}
 Environment=INTER_APP_SECRET={{INTER_APP_SECRET}}
 Environment=RAILS_LOG_TO_STDOUT=1
-Environment=SOLID_QUEUE_IN_PUMA=false
+Environment=SOLID_QUEUE_IN_PUMA=true
 ExecStart=/opt/rubies/ruby-{{RUBY_VERSION}}/bin/bundle exec puma -C config/puma.rb
 Restart=always
 RestartSec=5
