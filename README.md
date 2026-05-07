@@ -116,7 +116,21 @@ Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH acce
 
 | Setting | Description |
 |---------|-------------|
-| `GH_PAT` | GitHub personal access token with `repo` + `workflow` scope |
+| `GH_PAT` | GitHub personal access token. Classic: `repo` + `workflow`. Fine-grained: `Contents: write`, `Actions: write`, `Secrets: write` scoped to the target repo. Preflight enforces both. |
+
+### Rails app prerequisites
+
+Before running `deploy` against a new Rails repo, the repo itself must have:
+
+- **Production database paths set in `config/database.yml`.** Rails 8 ships with these commented out (the default scaffold expected Docker volumes). For SQLite:
+  ```yaml
+  production:
+    primary: { <<: *default, database: storage/production.sqlite3 }
+    cache:   { <<: *default, database: storage/production_cache.sqlite3, migrations_paths: db/cache_migrate }
+    queue:   { <<: *default, database: storage/production_queue.sqlite3, migrations_paths: db/queue_migrate }
+  ```
+  Preflight in `app.sh` checks this and aborts with instructions if the production paths are still commented out.
+- **`config/master.key` value supplied via `RAILS_MASTER_KEY`** if the repo has `config/credentials.yml.enc`. Otherwise Rails can't decrypt `secret_key_base` in production and `db:prepare` fails.
 
 ## Project Structure
 

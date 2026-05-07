@@ -26,22 +26,53 @@ deploy_app() {
     "
 
   info "Setting up database..."
-  # Write master key first (separate command to avoid quoting issues)
+
+  # Write the master key the operator supplied. Required when the repo ships
+  # an encrypted config/credentials.yml.enc — without the matching key Rails
+  # can't read secret_key_base in production and db:prepare crashes with
+  # ActiveSupport::MessageEncryptor::InvalidMessage. Generating a fresh key
+  # via `rails credentials:edit` (the old fallback) silently produces a key
+  # that DOESN'T match credentials.yml.enc, so the app boots without secrets.
+  local has_credentials
+  has_credentials=$(pct exec "${CTID}" -- bash -c "[[ -f ${APP_DIR}/config/credentials.yml.enc ]] && echo yes || echo no")
+
   if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
-    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chown deploy:deploy ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+    success "Master key installed"
+  elif [[ "${has_credentials}" == "yes" ]]; then
+    error "Repo has config/credentials.yml.enc but RAILS_MASTER_KEY is not set in deploy.conf or env. Add it (the value of config/master.key from your local checkout) and re-run."
+  else
+    info "No credentials.yml.enc in repo — skipping master key setup"
   fi
-  pct exec "${CTID}" -- bash -c "set -e
+
+  # Sanity-check that production database paths are configured. Rails 8
+  # scaffolding ships with the production primary/cache/queue paths
+  # commented out (originally for Docker volumes), which makes db:prepare
+  # and later db:migrate fail with `ArgumentError: No database file
+  # specified. Missing argument: database`.
+  local prod_db_uncommented
+  prod_db_uncommented=$(pct exec "${CTID}" -- bash -c "grep -A 30 '^production:' ${APP_DIR}/config/database.yml | grep -E '^[[:space:]]+database:[[:space:]]+[^#[:space:]]' | head -1 || true")
+  if [[ -z "${prod_db_uncommented}" ]]; then
+    warn "config/database.yml has no uncommented production database paths."
+    warn "Rails 8 ships these commented out by default — db:migrate will fail."
+    warn "Fix in your repo by setting (for SQLite):"
+    warn "  production:"
+    warn "    primary: { <<: *default, database: storage/production.sqlite3 }"
+    warn "    cache:   { <<: *default, database: storage/production_cache.sqlite3, migrations_paths: db/cache_migrate }"
+    warn "    queue:   { <<: *default, database: storage/production_queue.sqlite3, migrations_paths: db/queue_migrate }"
+    error "Fix config/database.yml in the repo, push, then re-run deploy."
+  fi
+
+  # Run db:prepare and capture exit code. set -o pipefail so a failure in
+  # the rake task isn't masked by the tail filter on its tail output.
+  pct exec "${CTID}" -- bash -c "set -eo pipefail
     export PATH=/opt/rubies/ruby-${RUBY_VERSION}/bin:\$PATH
     export GEM_HOME=/opt/rubies/ruby-${RUBY_VERSION}/lib/ruby/gems/3.3.0
     cd ${APP_DIR}
-    if [[ ! -f config/master.key ]]; then
-      EDITOR='echo' rails credentials:edit 2>/dev/null || true
-    fi
-    # Install migrations for Solid Queue/Cache if present
     bundle exec rails solid_queue:install:migrations 2>/dev/null || true
     bundle exec rails solid_cache:install:migrations 2>/dev/null || true
-    RAILS_ENV=production bundle exec rails db:prepare 2>&1 | tail -5
-  "
+    RAILS_ENV=production bundle exec rails db:prepare
+  " || error "db:prepare failed. Common causes: RAILS_MASTER_KEY mismatched with credentials.yml.enc, missing production database paths, or schema errors. Check the trace above."
   success "Database ready"
 
   run_with_status "Precompiling assets" \

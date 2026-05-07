@@ -55,16 +55,20 @@ gh_set_secrets() {
 
   # Check if Python + PyNaCl is available for encryption
   if python3 -c "from nacl.public import PublicKey, SealedBox" 2>/dev/null; then
-    _gh_set_secret_encrypted "DEPLOY_HOST" "${deploy_host}" "${repo_pubkey}" "${repo_key_id}"
-    _gh_set_secret_encrypted "DEPLOY_USER" "deploy" "${repo_pubkey}" "${repo_key_id}"
-    _gh_set_secret_encrypted "DEPLOY_SSH_KEY" "${deploy_key}" "${repo_pubkey}" "${repo_key_id}"
+    local failures=0
+    _gh_set_secret_encrypted "DEPLOY_HOST" "${deploy_host}" "${repo_pubkey}" "${repo_key_id}" || ((failures++))
+    _gh_set_secret_encrypted "DEPLOY_USER" "deploy" "${repo_pubkey}" "${repo_key_id}" || ((failures++))
+    _gh_set_secret_encrypted "DEPLOY_SSH_KEY" "${deploy_key}" "${repo_pubkey}" "${repo_key_id}" || ((failures++))
 
     # Tailscale OAuth for GitHub Actions runner to join tailnet
     if [[ -n "${TS_OAUTH_CLIENT_ID:-}" ]]; then
-      _gh_set_secret_encrypted "TS_OAUTH_CLIENT_ID" "${TS_OAUTH_CLIENT_ID}" "${repo_pubkey}" "${repo_key_id}"
-      _gh_set_secret_encrypted "TS_OAUTH_SECRET" "${TS_OAUTH_SECRET}" "${repo_pubkey}" "${repo_key_id}"
+      _gh_set_secret_encrypted "TS_OAUTH_CLIENT_ID" "${TS_OAUTH_CLIENT_ID}" "${repo_pubkey}" "${repo_key_id}" || ((failures++))
+      _gh_set_secret_encrypted "TS_OAUTH_SECRET" "${TS_OAUTH_SECRET}" "${repo_pubkey}" "${repo_key_id}" || ((failures++))
     fi
 
+    if [[ ${failures} -gt 0 ]]; then
+      error "${failures} GitHub Actions secret(s) failed to set. Check the PAT has 'Secrets: write' permission for ${GITHUB_USER}/${REPO_NAME} and re-run."
+    fi
     success "GitHub Actions secrets set"
   elif command -v gh &>/dev/null; then
     # Fallback: use gh CLI if available
@@ -104,8 +108,10 @@ print(base64.b64encode(encrypted).decode('utf-8'))
   if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/actions/secrets/${name}" \
     "{\"encrypted_value\":\"${encrypted}\",\"key_id\":\"${key_id}\"}"; then
     info "  Set secret: ${name}"
+    return 0
   else
     warn "  Failed to set secret: ${name}"
+    return 1
   fi
 }
 
@@ -179,9 +185,7 @@ gh_push_workflow() {
   if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" "${data}"; then
     success "GitHub Actions workflow pushed"
   else
-    warn "Failed to push workflow. You can add it manually."
-    echo ""
-    echo "${workflow_content}"
+    error "Failed to push .github/workflows/deploy.yml to ${GITHUB_USER}/${REPO_NAME}. The PAT needs 'Contents: write' (fine-grained) or 'repo' + 'workflow' (classic). Without the workflow file, push-to-deploy won't work — fix the token and re-run."
   fi
 }
 

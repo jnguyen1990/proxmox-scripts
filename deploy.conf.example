@@ -33,9 +33,17 @@ REPO_NAME=""
 # Proxmox storage pool (default: local-lvm)
 # STORAGE="local-lvm"
 
-# ── Rails Master Key (optional) ─────────────────────────────────────────────
-# Contents of config/master.key from your Rails app.
-# Needed to decrypt credentials in production.
+# ── Rails Master Key ──────────────────────────────────────────────────────
+# REQUIRED if your repo has config/credentials.yml.enc (default for Rails 8
+# scaffolding). The deploy will hard-fail in preflight if it sees an
+# encrypted credentials file and this is missing.
+#
+# Without the matching key, Rails can't decrypt secret_key_base in
+# production, so the app boots without secrets and the very first
+# bin/rails db:prepare crashes (silently, before this fix).
+#
+# Get it from your local checkout:
+#   cat /Users/me/Repos/<app>/config/master.key
 # RAILS_MASTER_KEY=""
 
 # ── Inter-App Secret (shared across apps) ──────────────────────────────────
@@ -86,7 +94,11 @@ REPO_NAME=""
 #   1. Add deployment secrets to your GitHub repo
 #   2. Push a GitHub Actions workflow file for auto-deploy on push to main
 #
-# Required token permissions: repo (full control)
+# Required token permissions:
+#   Classic PAT:       'repo' + 'workflow'  (preflight enforces both scopes)
+#   Fine-grained PAT:  'Contents: write', 'Actions: write', 'Secrets: write'
+#                      scoped to the target repo. Preflight tests write
+#                      access by hitting the repo's contents endpoint.
 # Requires Tailscale to be configured for SSH access.
 
 # GitHub personal access token
