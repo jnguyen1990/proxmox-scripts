@@ -13,9 +13,11 @@ create_deploy_user() {
     # Give deploy user access to the app directory
     chown -R deploy:deploy ${APP_DIR}
 
-    # Allow deploy user to restart the app service without password
-    echo 'deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ${REPO_NAME}, /usr/bin/systemctl reload ${REPO_NAME}, /usr/bin/systemctl status ${REPO_NAME}' > /etc/sudoers.d/${REPO_NAME}-deploy
+    # Allow deploy user to restart the app service, sync the repo-managed
+    # systemd unit (bin/deploy renders it to /opt/{app}/tmp), and daemon-reload
+    echo 'deploy ALL=(ALL) NOPASSWD: /usr/bin/install -m 644 ${APP_DIR}/tmp/${REPO_NAME}.service /etc/systemd/system/${REPO_NAME}.service, /usr/bin/systemctl daemon-reload, /usr/bin/systemctl restart ${REPO_NAME}, /usr/bin/systemctl reload ${REPO_NAME}, /usr/bin/systemctl status ${REPO_NAME}' > /etc/sudoers.d/${REPO_NAME}-deploy
     chmod 440 /etc/sudoers.d/${REPO_NAME}-deploy
+    visudo -c > /dev/null
 
     # Generate SSH key for deploy user (for GitHub Actions)
     if [[ ! -f /home/deploy/.ssh/id_ed25519 ]]; then
