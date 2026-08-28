@@ -3,5 +3,7 @@ credentials-file: /etc/cloudflared/{{TUNNEL_ID}}.json
 
 ingress:
   - hostname: {{CF_SUBDOMAIN}}.{{CF_DOMAIN}}
-    service: http://localhost:{{APP_PORT}}
+    # 127.0.0.1, not localhost: current cloudflared resolves localhost to ::1
+    # and won't fall back to IPv4, 502ing against an IPv4-only puma.
+    service: http://127.0.0.1:{{APP_PORT}}
   - service: http_status:404
