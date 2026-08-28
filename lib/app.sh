@@ -37,7 +37,11 @@ deploy_app() {
   has_credentials=$(pct exec "${CTID}" -- bash -c "[[ -f ${APP_DIR}/config/credentials.yml.enc ]] && echo yes || echo no")
 
   if [[ -n "${RAILS_MASTER_KEY:-}" ]]; then
-    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chown deploy:deploy ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
+    # No chown here: the deploy user doesn't exist yet (create_deploy_user
+    # runs after deploy_app and does a recursive chown of APP_DIR that
+    # covers this file). Chowning here broke every fresh provision with
+    # "chown: invalid user: 'deploy:deploy'".
+    pct exec "${CTID}" -- bash -c "echo '${RAILS_MASTER_KEY}' > ${APP_DIR}/config/master.key && chmod 600 ${APP_DIR}/config/master.key"
     success "Master key installed"
   elif [[ "${has_credentials}" == "yes" ]]; then
     error "Repo has config/credentials.yml.enc but RAILS_MASTER_KEY is not set in deploy.conf or env. Add it (the value of config/master.key from your local checkout) and re-run."
