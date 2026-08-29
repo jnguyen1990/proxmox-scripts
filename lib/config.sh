@@ -103,13 +103,20 @@ EOF
 # _write_secrets_file which rewrites and drops per-app RAILS_MASTER_KEY_*
 # rows).
 _persist_inter_app_secret() {
+  persist_secret "INTER_APP_SECRET" "${INTER_APP_SECRET}" "Inter-app shared bearer token (personal_app_client gem)"
+}
+
+# Generic idempotent upsert into SECRETS_FILE: persist_secret KEY VALUE [comment]
+persist_secret() {
+  local key="$1" value="$2" comment="${3:-}"
   touch "${SECRETS_FILE}" && chmod 600 "${SECRETS_FILE}"
-  if grep -q "^INTER_APP_SECRET=" "${SECRETS_FILE}"; then
-    sed -i "s|^INTER_APP_SECRET=.*|INTER_APP_SECRET=\"${INTER_APP_SECRET}\"|" "${SECRETS_FILE}"
+  if grep -q "^${key}=" "${SECRETS_FILE}"; then
+    sed -i "s|^${key}=.*|${key}=\"${value}\"|" "${SECRETS_FILE}"
   else
-    printf '\n# Inter-app shared bearer token (personal_app_client gem)\nINTER_APP_SECRET="%s"\n' "${INTER_APP_SECRET}" >> "${SECRETS_FILE}"
+    [[ -n "${comment}" ]] && printf '\n# %s\n' "${comment}" >> "${SECRETS_FILE}" || printf '\n' >> "${SECRETS_FILE}"
+    printf '%s="%s"\n' "${key}" "${value}" >> "${SECRETS_FILE}"
   fi
-  success "Saved INTER_APP_SECRET to ${SECRETS_FILE}"
+  success "Saved ${key} to ${SECRETS_FILE}"
 }
 
 # Resolve INTER_APP_SECRET via SECRETS_FILE → prompt → openssl-generate.

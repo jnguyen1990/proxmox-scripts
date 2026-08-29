@@ -256,6 +256,19 @@ else
   setup_systemd && check_fixed "Systemd service created" || check_fail "Systemd service"
 fi
 
+# ── 11b. MCP OAuth drop-in ─────────────────────────────────────────────────
+if pct exec "${CTID}" -- test -f "/etc/systemd/system/${REPO_NAME}.service.d/oauth.conf" 2>/dev/null; then
+  check_ok "MCP oauth.conf present"
+else
+  info "Writing MCP oauth.conf..."
+  if write_oauth_dropin; then
+    pct exec "${CTID}" -- bash -c "systemctl daemon-reload && systemctl restart ${REPO_NAME}"
+    check_fixed "MCP oauth.conf written + service restarted"
+  else
+    check_fail "MCP oauth.conf (CF_DOMAIN not configured)"
+  fi
+fi
+
 # ── 11. Nginx ───────────────────────────────────────────────────────────────
 if pct exec "${CTID}" -- test -f "/etc/nginx/sites-available/${REPO_NAME}" 2>/dev/null; then
   check_ok "Nginx configured"

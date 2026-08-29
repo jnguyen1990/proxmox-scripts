@@ -29,9 +29,37 @@ gh_api() {
   return 0
 }
 
+# OAuth clients don't expire but can be revoked. Validate the saved pair
+# against Tailscale's token endpoint before pushing it into repo secrets;
+# prompt for a replacement (and persist it) if it's dead. Without valid
+# TS_OAUTH_* secrets the deploy workflow can't join the tailnet.
+ensure_ts_oauth_pair() {
+  [[ -z "${TS_OAUTH_CLIENT_ID:-}" ]] && return 0
+  local code
+  code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+    -d "client_id=${TS_OAUTH_CLIENT_ID}" -d "client_secret=${TS_OAUTH_SECRET:-}" \
+    "https://api.tailscale.com/api/v2/oauth/token" || echo "000")
+  if [[ "${code}" == "200" ]]; then
+    info "TS OAuth pair validated"
+    return 0
+  fi
+  warn "Saved TS_OAUTH pair rejected by Tailscale (HTTP ${code}) — revoked?"
+  info "Create a new OAuth client (scope: auth keys, tag:ci): https://login.tailscale.com/admin/settings/oauth"
+  read -rp "$(echo -e "${BOLD}New TS OAuth client id${NC} (or Enter to keep the old pair): ")" _new_ts_oid
+  if [[ -n "${_new_ts_oid}" ]]; then
+    read -rp "$(echo -e "${BOLD}New TS OAuth client secret${NC}: ")" _new_ts_osec
+    TS_OAUTH_CLIENT_ID="${_new_ts_oid}"
+    TS_OAUTH_SECRET="${_new_ts_osec}"
+    persist_secret "TS_OAUTH_CLIENT_ID" "${TS_OAUTH_CLIENT_ID}" "Tailscale OAuth client for GitHub Actions deploys (tag:ci)"
+    persist_secret "TS_OAUTH_SECRET" "${TS_OAUTH_SECRET}"
+  fi
+}
+
 gh_set_secrets() {
   local deploy_key="$1"
   local deploy_host="$2"
+
+  ensure_ts_oauth_pair
 
   info "Setting GitHub Actions secrets on ${GITHUB_USER}/${REPO_NAME}..."
 
