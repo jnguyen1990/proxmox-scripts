@@ -2,6 +2,8 @@
 
 Modular LXC container creation and Rails app deployment for Proxmox VE, with optional Cloudflare tunnel, Tailscale VPN, and GitHub Actions auto-deploy.
 
+> **Standing up a whole new app?** Follow [NEW-APP-RUNBOOK.md](NEW-APP-RUNBOOK.md) — the end-to-end checklist (build → push → provision → Access → connector), with every known hiccup annotated. This README covers only the provisioning script itself.
+
 ## Commands
 
 All commands are one-liners pasted into the Proxmox VE shell:
