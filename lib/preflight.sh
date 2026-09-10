@@ -130,9 +130,9 @@ preflight_check_github() {
       -H "Authorization: token ${GH_PAT}" \
       "https://api.github.com/repos/${GITHUB_USER}/${REPO_NAME}")
     if [[ "${write_code}" == "404" ]]; then
-      error "Fine-grained PAT cannot see repo ${GITHUB_USER}/${REPO_NAME}. In the token's settings, grant access to this repo with 'Contents: write' + 'Actions: write' + 'Secrets: write' permissions."
+      error "Fine-grained PAT cannot see repo ${GITHUB_USER}/${REPO_NAME}. In the token's settings, grant access to this repo with 'Contents: write' + 'Workflows: write' + 'Actions: write' + 'Secrets: write' permissions."
     elif [[ "${write_code}" != "200" ]]; then
-      error "Fine-grained PAT validation failed against ${GITHUB_USER}/${REPO_NAME} (HTTP ${write_code}). Required permissions: 'Contents: write', 'Actions: write', 'Secrets: write'."
+      error "Fine-grained PAT validation failed against ${GITHUB_USER}/${REPO_NAME} (HTTP ${write_code}). Required permissions: 'Contents: write', 'Workflows: write', 'Actions: write', 'Secrets: write'."
     fi
     success "GitHub token valid (fine-grained, scoped to ${GITHUB_USER}/${REPO_NAME})"
   fi

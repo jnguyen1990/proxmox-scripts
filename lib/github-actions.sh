@@ -213,7 +213,7 @@ gh_push_workflow() {
   if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" "${data}"; then
     success "GitHub Actions workflow pushed"
   else
-    error "Failed to push .github/workflows/deploy.yml to ${GITHUB_USER}/${REPO_NAME}. The PAT needs 'Contents: write' (fine-grained) or 'repo' + 'workflow' (classic). Without the workflow file, push-to-deploy won't work — fix the token and re-run."
+    error "Failed to push .github/workflows/deploy.yml to ${GITHUB_USER}/${REPO_NAME}. The PAT needs 'Contents: write' + 'Workflows: write' (fine-grained — Contents alone CANNOT write under .github/workflows/) or 'repo' + 'workflow' (classic). Without the workflow file, push-to-deploy won't work — fix the token and re-run."
   fi
 }
 

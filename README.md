@@ -116,7 +116,7 @@ Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH acce
 
 | Setting | Description |
 |---------|-------------|
-| `GH_PAT` | GitHub personal access token. Classic: `repo` + `workflow`. Fine-grained: `Contents: write`, `Actions: write`, `Secrets: write` scoped to the target repo. Preflight enforces both. |
+| `GH_PAT` | GitHub personal access token. Classic: `repo` + `workflow`. Fine-grained: `Contents: write`, `Workflows: write`, `Actions: write`, `Secrets: write` scoped to the target repo (Workflows is separate from Contents and required to push `.github/workflows/` files — Contents alone 403s). Preflight can only verify repo visibility for fine-grained tokens, not per-permission grants. |
 
 ### Rails app prerequisites
 

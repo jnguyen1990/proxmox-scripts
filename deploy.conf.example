@@ -96,7 +96,10 @@ REPO_NAME=""
 #
 # Required token permissions:
 #   Classic PAT:       'repo' + 'workflow'  (preflight enforces both scopes)
-#   Fine-grained PAT:  'Contents: write', 'Actions: write', 'Secrets: write'
+#   Fine-grained PAT:  'Contents: write', 'Workflows: write', 'Actions: write',
+#                      'Secrets: write' — Workflows is a SEPARATE permission and
+#                      is required to push .github/workflows/ files; Contents
+#                      alone 403s on that step (bit postings, 2026-09-10)
 #                      scoped to the target repo. Preflight tests write
 #                      access by hitting the repo's contents endpoint.
 # Requires Tailscale to be configured for SSH access.
