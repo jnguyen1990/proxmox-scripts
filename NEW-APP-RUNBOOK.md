@@ -1,5 +1,8 @@
 # New App Runbook — repo to nightly-agent, end to end
 
+> **Updated 2026-11-05.** Scaffolding now lives in `~/Repos/rails-app-template` — follow its README (full `rails new` skip-flag set, then `bin/apply`) instead of the Phase A commands below, and use its checklist for the steps outside this repo (base `config/apps.yml` and OAuth audience, the mini's script lists, design-system accent, gem README). The deploy workflow this repo pushes is now the CI-gated one (`workflow_run` on CI + `workflow_dispatch`), so the Phase E note about no manual trigger no longer applies. The `json ~> 2.9` pin did not reproduce on Rails 8.1.4.1.
+
+
 The canonical step-by-step for standing up a new app in the constellation
 (`<app>` = lowercase app name, e.g. `postings`). Distilled from the upkeep
 (2026-08-28) and postings (2026-09-09/10) rounds — every ⚠️ below is a thing

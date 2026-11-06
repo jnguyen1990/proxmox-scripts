@@ -1,12 +1,25 @@
 name: Deploy
 
+# Deploys main only after the CI workflow has passed on it, so a red build
+# never ships. Run it by hand from the Actions tab to redeploy without a push.
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
     steps:
       - name: Connect to Tailscale
         uses: tailscale/github-action@v2
@@ -23,4 +36,21 @@ jobs:
           ssh -o StrictHostKeyChecking=no \
               -i ~/.ssh/deploy_key \
               ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-              '{{APP_DIR}}/bin/deploy'
+              'cd {{APP_DIR}} && git fetch origin main && git reset --hard origin/main && {{APP_DIR}}/bin/deploy'
+
+      # Poll /up over Tailscale until 200 or 60s elapsed. Catches deploys that
+      # succeed at the SSH level but fail to bring Puma back up.
+      - name: Verify deploy via healthcheck
+        run: |
+          for i in {1..30}; do
+            code=$(curl -sS -o /dev/null --max-time 5 -w "%{http_code}" \
+              http://{{REPO_NAME}}.tail5ece07.ts.net:3000/up || echo "000")
+            if [[ "$code" == "200" ]]; then
+              echo "✓ healthcheck passed (attempt $i)"
+              exit 0
+            fi
+            echo "  attempt $i: $code — retrying"
+            sleep 2
+          done
+          echo "✗ healthcheck failed after 60s"
+          exit 1
