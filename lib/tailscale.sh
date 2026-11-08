@@ -53,5 +53,23 @@ ts_setup() {
     return 0
   fi
 
+  ts_pin_dns
   success "Tailscale connected: ${TS_IP} (${REPO_NAME})"
+}
+
+# tailscaled writes /etc/resolv.conf itself (the Debian template has no
+# systemd-resolved), but the CTs are ip=dhcp and dhclient-script rewrites
+# resolv.conf on lease renewal — MagicDNS silently vanishes and inter-app
+# calls fail with getaddrinfo errors (upkeep, 2026-11-08). An enter hook that
+# no-ops make_resolv_conf leaves the file to tailscaled.
+ts_pin_dns() {
+  pct exec "${CTID}" -- bash -c 'mkdir -p /etc/dhcp/dhclient-enter-hooks.d && cat > /etc/dhcp/dhclient-enter-hooks.d/tailscale-dns <<"EOF"
+# proxmox-scripts: tailscaled owns /etc/resolv.conf (MagicDNS); keep
+# dhclient from overwriting it on lease renewal.
+make_resolv_conf() { :; }
+EOF'
+}
+
+ts_dns_ok() {
+  pct exec "${CTID}" -- grep -q '^nameserver 100\.100\.100\.100' /etc/resolv.conf 2>/dev/null
 }

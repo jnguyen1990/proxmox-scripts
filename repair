@@ -296,11 +296,28 @@ if [[ -n "${TS_AUTHKEY:-}" || -n "${TS_OAUTH_CLIENT_ID:-}" ]]; then
     check_ok "Tailscale connected (${TS_IP})"
     # Ensure MagicDNS is on (older deploys ran with --accept-dns=false,
     # which breaks <hostname>.<tailnet>.ts.net resolution and therefore
-    # the personal_app_client gem's inter-app HTTP).
-    if ! pct exec "${CTID}" -- bash -c "tailscale status --json 2>/dev/null | grep -q '\"AcceptDNS\":true'" 2>/dev/null; then
+    # the personal_app_client gem's inter-app HTTP). The pref lives in
+    # `debug prefs` as CorpDNS — `status --json` never carried AcceptDNS, so
+    # the old check "fixed" this on every run and never looked at resolv.conf.
+    if pct exec "${CTID}" -- bash -c "tailscale debug prefs 2>/dev/null | grep -q '\"CorpDNS\": true'" 2>/dev/null; then
+      check_ok "Tailscale MagicDNS enabled"
+    else
       info "Enabling MagicDNS (--accept-dns=true)..."
       pct exec "${CTID}" -- tailscale set --accept-dns=true 2>/dev/null
       check_fixed "Tailscale MagicDNS enabled"
+    fi
+    if pct exec "${CTID}" -- test -f /etc/dhcp/dhclient-enter-hooks.d/tailscale-dns 2>/dev/null; then
+      check_ok "DHCP leaves resolv.conf to Tailscale"
+    else
+      ts_pin_dns && check_fixed "DHCP leaves resolv.conf to Tailscale" || check_fail "dhclient resolv.conf hook"
+    fi
+    if ts_dns_ok; then
+      check_ok "MagicDNS in resolv.conf"
+    else
+      info "resolv.conf lost MagicDNS, restarting tailscaled to rewrite it..."
+      pct exec "${CTID}" -- systemctl restart tailscaled 2>/dev/null
+      sleep 5
+      ts_dns_ok && check_fixed "MagicDNS in resolv.conf" || check_fail "MagicDNS in resolv.conf"
     fi
   else
     # Check if tailscale is installed
