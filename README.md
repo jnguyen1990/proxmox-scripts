@@ -84,7 +84,7 @@ All settings are prompted interactively. For repeated deploys, use `deploy.conf`
 | `REPO_NAME` | *(required)* | GitHub repo name (e.g. `hub`, `budgeter`) |
 | `GITHUB_USER` | `jnguyen1990` | GitHub username |
 | `APP_PORT` | `3000` | Internal app port |
-| `RUBY_VERSION` | `3.3.11` | Ruby version to install |
+| `RUBY_VERSION` | `3.3.14` | Ruby version to install |
 | `LXC_RAM` | `1024` | Container RAM in MB |
 | `LXC_DISK` | `4` | Container disk in GB |
 | `LXC_CORES` | `1` | Container CPU cores |

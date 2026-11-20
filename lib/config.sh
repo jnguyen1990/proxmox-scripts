@@ -166,7 +166,7 @@ load_config() {
 
   # Defaults for optional values
   GITHUB_USER="${GITHUB_USER:-jnguyen1990}"
-  RUBY_VERSION="${RUBY_VERSION:-3.3.11}"
+  RUBY_VERSION="${RUBY_VERSION:-3.3.14}"
   DEBIAN_TEMPLATE="${DEBIAN_TEMPLATE:-debian-12-standard}"
   APP_PORT="${APP_PORT:-3000}"
   LXC_RAM="${LXC_RAM:-1024}"

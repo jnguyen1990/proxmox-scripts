@@ -35,7 +35,7 @@ fi
 
 # ── Configuration ────────────────────────────────────────────────────────────
 GITHUB_USER="jnguyen1990"
-RUBY_VERSION="3.3.11"
+RUBY_VERSION="3.3.14"
 DEBIAN_TEMPLATE="debian-12-standard"
 
 header "Proxmox LXC Rails App Deployer"

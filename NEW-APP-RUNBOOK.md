@@ -84,7 +84,7 @@ bash -c "$(wget -qLO - https://raw.githubusercontent.com/jnguyen1990/proxmox-scr
 
 - Prompts: `REPO_NAME=<app>`, paste `RAILS_MASTER_KEY`; everything else comes
   from `/root/.proxmox-deploy-secrets` (CF, TS, GH_PAT, INTER_APP_SECRET) or
-  defaults (port 3000, Ruby 3.3.11, 1 GB/4 GB/1 core).
+  defaults (port 3000, Ruby 3.3.14, 1 GB/4 GB/1 core).
 - ⚠️ **Fine-grained GH_PAT needs `Workflows: write`** as a SEPARATE permission
   from `Contents: write` — Contents alone 403s pushing
   `.github/workflows/deploy.yml` and the script dies before setting the
