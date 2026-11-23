@@ -50,7 +50,7 @@ Prints the secrets, deploy key, and workflow file needed to set up auto-deploy f
 6. **Services** - Configures systemd + nginx reverse proxy
 7. **Cloudflare Tunnel** *(optional)* - Creates tunnel via API, installs cloudflared, sets up DNS
 8. **Tailscale** *(optional)* - Installs Tailscale in container for SSH access from anywhere
-9. **GitHub Actions** *(optional)* - Sets deployment secrets, pushes workflow for auto-deploy on push to main
+9. **GitHub Actions** *(optional)* - Sets deployment secrets, pushes the deploy workflow if the repo has none (an existing `deploy.yml` is never overwritten)
 
 ## Post-Deploy Checklist — Protect the new app with Cloudflare Access
 
@@ -114,7 +114,7 @@ Mesh VPN for SSH access to containers from anywhere. Used by GitHub Actions for 
 
 ### GitHub Actions Auto-Deploy (optional)
 
-Pushes a workflow and sets secrets on your repo. Requires Tailscale for SSH access.
+Sets secrets on your repo and adds the deploy workflow if `.github/workflows/deploy.yml` does not exist yet (an existing one is left alone). Requires Tailscale for SSH access.
 
 | Setting | Description |
 |---------|-------------|

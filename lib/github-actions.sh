@@ -190,6 +190,17 @@ gh_print_secrets() {
 }
 
 gh_push_workflow() {
+  local wf_path=".github/workflows/deploy.yml"
+
+  # Never overwrite an existing workflow. Apps own their deploy.yml once it
+  # exists (they get fixes the template may lag behind); a re-run of deploy or
+  # repair only adds the file when it is missing.
+  if gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/contents/${wf_path}" >/dev/null \
+     && echo "${GH_API_BODY}" | grep -q '"sha" *: *"'; then
+    info "${wf_path} already exists in ${GITHUB_USER}/${REPO_NAME} — leaving it alone"
+    return 0
+  fi
+
   info "Pushing GitHub Actions workflow to ${GITHUB_USER}/${REPO_NAME}..."
 
   local workflow_content
@@ -198,22 +209,12 @@ gh_push_workflow() {
   local encoded
   encoded=$(echo "${workflow_content}" | base64 | tr -d '\n')
 
-  # Check if file already exists
-  gh_api GET "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" || true
-  local sha
-  sha=$(echo "${GH_API_BODY}" | grep -o '"sha" *: *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  local data="{\"message\":\"Add auto-deploy workflow\",\"content\":\"${encoded}\"}"
 
-  local data
-  if [[ -n "${sha}" ]]; then
-    data="{\"message\":\"Update auto-deploy workflow\",\"content\":\"${encoded}\",\"sha\":\"${sha}\"}"
-  else
-    data="{\"message\":\"Add auto-deploy workflow\",\"content\":\"${encoded}\"}"
-  fi
-
-  if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/.github/workflows/deploy.yml" "${data}"; then
+  if gh_api PUT "/repos/${GITHUB_USER}/${REPO_NAME}/contents/${wf_path}" "${data}"; then
     success "GitHub Actions workflow pushed"
   else
-    error "Failed to push .github/workflows/deploy.yml to ${GITHUB_USER}/${REPO_NAME}. The PAT needs 'Contents: write' + 'Workflows: write' (fine-grained — Contents alone CANNOT write under .github/workflows/) or 'repo' + 'workflow' (classic). Without the workflow file, push-to-deploy won't work — fix the token and re-run."
+    error "Failed to push ${wf_path} to ${GITHUB_USER}/${REPO_NAME}. The PAT needs 'Contents: write' + 'Workflows: write' (fine-grained — Contents alone CANNOT write under .github/workflows/) or 'repo' + 'workflow' (classic). Without the workflow file, push-to-deploy won't work — fix the token and re-run."
   fi
 }
 
