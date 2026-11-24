@@ -53,7 +53,25 @@ Environment=MCP_OAUTH_ISSUER=https://base.${CF_DOMAIN}
 Environment=MCP_OAUTH_JWKS_URL=https://base.${CF_DOMAIN}/oauth/discovery/keys
 Environment=MCP_RESOURCE_URL=https://${mcp_host}/api/mcp
 Environment=MCP_PR_METADATA_URL=https://${mcp_host}/.well-known/oauth-protected-resource
+Environment=MCP_OAUTH_JWKS_FILE=/etc/${REPO_NAME}/oauth_jwks.json
 OAUTH_EOF
 chmod 600 /etc/systemd/system/${REPO_NAME}.service.d/oauth.conf"
   success "oauth.conf written (MCP OAuth resource-server env for ${mcp_host})"
+  write_oauth_jwks || warn "base's JWKS not saved — connector tokens are checked over the network only"
+  return 0
+}
+
+# /etc/{app}/oauth_jwks.json — base's PUBLIC signing keys (personal_app_client
+# MCP_OAUTH_JWKS_FILE, v0.9.0). The app checks connector tokens against this
+# file first and asks base only for a key id it lacks, so an app restarted
+# while base is down still accepts connector calls (it used to reject all of
+# them until base returned). Public keys: 644, no secret. Re-run (repair) after
+# base's signing key rotates — the network fallback covers the gap meanwhile.
+write_oauth_jwks() {
+  [[ -n "${CF_DOMAIN:-}" ]] || return 1
+  local jwks
+  jwks=$(curl -sf -m 15 "https://base.${CF_DOMAIN}/oauth/discovery/keys") || return 1
+  printf '%s' "$jwks" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("keys") else 1)' || return 1
+  printf '%s' "$jwks" | pct exec "${CTID}" -- bash -c "mkdir -p /etc/${REPO_NAME} && cat > /etc/${REPO_NAME}/oauth_jwks.json && chmod 644 /etc/${REPO_NAME}/oauth_jwks.json"
+  success "base's public JWKS saved to /etc/${REPO_NAME}/oauth_jwks.json"
 }

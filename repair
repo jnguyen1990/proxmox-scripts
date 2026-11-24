@@ -257,10 +257,13 @@ else
 fi
 
 # ── 11b. MCP OAuth drop-in ─────────────────────────────────────────────────
-if pct exec "${CTID}" -- test -f "/etc/systemd/system/${REPO_NAME}.service.d/oauth.conf" 2>/dev/null; then
-  check_ok "MCP oauth.conf present"
+# Since personal_app_client v0.9.0 oauth.conf also names base's public JWKS on disk
+# (MCP_OAUTH_JWKS_FILE) — rewritten when either is missing.
+if pct exec "${CTID}" -- grep -q MCP_OAUTH_JWKS_FILE "/etc/systemd/system/${REPO_NAME}.service.d/oauth.conf" 2>/dev/null \
+   && pct exec "${CTID}" -- test -s "/etc/${REPO_NAME}/oauth_jwks.json" 2>/dev/null; then
+  check_ok "MCP oauth.conf + base JWKS file present"
 else
-  info "Writing MCP oauth.conf..."
+  info "Writing MCP oauth.conf + base's JWKS file..."
   if write_oauth_dropin; then
     pct exec "${CTID}" -- bash -c "systemctl daemon-reload && systemctl restart ${REPO_NAME}"
     check_fixed "MCP oauth.conf written + service restarted"
